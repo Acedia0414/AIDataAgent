@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `retryLimit` int DEFAULT 3 NOT NULL;

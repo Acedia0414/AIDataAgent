@@ -1,0 +1,111 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1767766310671,
+      "tag": "0000_pretty_loners",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1767766456397,
+      "tag": "0001_spotty_king_cobra",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1767776881978,
+      "tag": "0002_fluffy_talisman",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1767777515972,
+      "tag": "0003_skinny_rhodey",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1767794473727,
+      "tag": "0004_fluffy_klaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1767810412617,
+      "tag": "0005_safe_klaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1767851315434,
+      "tag": "0006_talented_puma",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1767854557168,
+      "tag": "0007_perpetual_maginty",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1767859134733,
+      "tag": "0008_tense_leader",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1767861857260,
+      "tag": "0009_groovy_ronan",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1767880931851,
+      "tag": "0010_dapper_risque",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1767885428402,
+      "tag": "0011_simple_slyde",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1767892637607,
+      "tag": "0012_amused_black_tarantula",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1767944465125,
+      "tag": "0013_nasty_taskmaster",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1768188301727,
+      "tag": "0014_dear_manta",
+      "breakpoints": true
+    }
+  ]
+}

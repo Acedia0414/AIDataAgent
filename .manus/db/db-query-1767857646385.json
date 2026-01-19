@@ -1,0 +1,190 @@
+{
+  "query": "SELECT mt.tableName, mf.fieldName, mf.fieldType, mf.businessMeaning\nFROM metadata_tables mt\nJOIN metadata_fields mf ON mt.id = mf.tableId\nWHERE mt.tableName = 'CustTable'\nORDER BY mf.fieldName\nLIMIT 30;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 26Ls9jmxqFtfiZr.root --database Xr6iidL4xxRqprpkkKRwbD --execute SELECT mt.tableName, mf.fieldName, mf.fieldType, mf.businessMeaning\nFROM metadata_tables mt\nJOIN metadata_fields mf ON mt.id = mf.tableId\nWHERE mt.tableName = 'CustTable'\nORDER BY mf.fieldName\nLIMIT 30;",
+  "rows": [
+    {
+      "tableName": "CustTable",
+      "fieldName": "AccountNum",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "CustAccount"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "AccountStatement",
+      "fieldType": "INT",
+      "businessMeaning": "NULL"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "Affiliated_RU",
+      "fieldType": "INT",
+      "businessMeaning": "CustAffiliated_RU"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "AgencyLocationCode",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "AgencyLocationCode"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "AuthorityOffice_IT",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "AuthorityOffice_IT"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "BankAccount",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "CustBankAccountId"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "BankCentralBankPurposeCode",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "BankCentralBankPurposeCode"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "BankCentralBankPurposeText",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "BankCentralBankPurposeText"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "BankCustPaymIdTable",
+      "fieldType": "BIGINT",
+      "businessMeaning": "BankCustPaymIdRecId"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "BirthCountyCode_IT",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "AddressCountyCode_IT"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "BirthDate_IT",
+      "fieldType": "DATE",
+      "businessMeaning": "BirthDate"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "BirthPlace_IT",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "AddressCity"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "BlockFloorLimitUseInChannel",
+      "fieldType": "INT",
+      "businessMeaning": "BlockFloorLimitUseInChannel"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "Blocked",
+      "fieldType": "INT",
+      "businessMeaning": "CustBlocked"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "CCMNum_BR",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "CCMNum_BR"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "CFDIEnabled_MX",
+      "fieldType": "INT",
+      "businessMeaning": "CFDIPackingSlipEnabled_MX"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "CFDISkipIEPSTaxes_MX",
+      "fieldType": "INT",
+      "businessMeaning": "CFDISkipIEPS_MX"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "CNAE_BR",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "CNAE_BR"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "CNPJCPFNum_BR",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "CNPJCPFNum_BR"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "CashDisc",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "CustCashDiscCode"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "CashDiscBaseDays",
+      "fieldType": "INT",
+      "businessMeaning": "CashDiscBaseDays"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "ClearingPeriod",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "CustClearingPeriod"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "CollectionLetterCode",
+      "fieldType": "INT",
+      "businessMeaning": "NULL"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "CommercialRegister",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "CommercialRegister"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "CommercialRegisterInsetNumber",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "CommercialRegisterInsetNumber"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "CommercialRegisterSection",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "CommercialRegisterSection"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "CommissionGroup",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "CommissCustomerGroup"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "CompanyChainId",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "smmChainId"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "CompanyIdSiret",
+      "fieldType": "NVARCHAR",
+      "businessMeaning": "CompanyIdSiret"
+    },
+    {
+      "tableName": "CustTable",
+      "fieldName": "CompanyNAFCode",
+      "fieldType": "BIGINT",
+      "businessMeaning": "CompanyNAFRecId"
+    }
+  ],
+  "messages": [],
+  "stdout": "tableName\tfieldName\tfieldType\tbusinessMeaning\nCustTable\tAccountNum\tNVARCHAR\tCustAccount\nCustTable\tAccountStatement\tINT\tNULL\nCustTable\tAffiliated_RU\tINT\tCustAffiliated_RU\nCustTable\tAgencyLocationCode\tNVARCHAR\tAgencyLocationCode\nCustTable\tAuthorityOffice_IT\tNVARCHAR\tAuthorityOffice_IT\nCustTable\tBankAccount\tNVARCHAR\tCustBankAccountId\nCustTable\tBankCentralBankPurposeCode\tNVARCHAR\tBankCentralBankPurposeCode\nCustTable\tBankCentralBankPurposeText\tNVARCHAR\tBankCentralBankPurposeText\nCustTable\tBankCustPaymIdTable\tBIGINT\tBankCustPaymIdRecId\nCustTable\tBirthCountyCode_IT\tNVARCHAR\tAddressCountyCode_IT\nCustTable\tBirthDate_IT\tDATE\tBirthDate\nCustTable\tBirthPlace_IT\tNVARCHAR\tAddressCity\nCustTable\tBlockFloorLimitUseInChannel\tINT\tBlockFloorLimitUseInChannel\nCustTable\tBlocked\tINT\tCustBlocked\nCustTable\tCCMNum_BR\tNVARCHAR\tCCMNum_BR\nCustTable\tCFDIEnabled_MX\tINT\tCFDIPackingSlipEnabled_MX\nCustTable\tCFDISkipIEPSTaxes_MX\tINT\tCFDISkipIEPS_MX\nCustTable\tCNAE_BR\tNVARCHAR\tCNAE_BR\nCustTable\tCNPJCPFNum_BR\tNVARCHAR\tCNPJCPFNum_BR\nCustTable\tCashDisc\tNVARCHAR\tCustCashDiscCode\nCustTable\tCashDiscBaseDays\tINT\tCashDiscBaseDays\nCustTable\tClearingPeriod\tNVARCHAR\tCustClearingPeriod\nCustTable\tCollectionLetterCode\tINT\tNULL\nCustTable\tCommercialRegister\tNVARCHAR\tCommercialRegister\nCustTable\tCommercialRegisterInsetNumber\tNVARCHAR\tCommercialRegisterInsetNumber\nCustTable\tCommercialRegisterSection\tNVARCHAR\tCommercialRegisterSection\nCustTable\tCommissionGroup\tNVARCHAR\tCommissCustomerGroup\nCustTable\tCompanyChainId\tNVARCHAR\tsmmChainId\nCustTable\tCompanyIdSiret\tNVARCHAR\tCompanyIdSiret\nCustTable\tCompanyNAFCode\tBIGINT\tCompanyNAFRecId\n",
+  "stderr": "",
+  "execution_time_ms": 66
+}

@@ -1,0 +1,1 @@
+ALTER TABLE `llm_configurations` MODIFY COLUMN `provider` enum('openai','azure_openai','manus_builtin','custom') NOT NULL;

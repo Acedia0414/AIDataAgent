@@ -1,0 +1,25 @@
+{
+  "query": "SELECT mt.tableName, COUNT(mf.id) as fieldCount, mt.description\nFROM metadata_tables mt \nLEFT JOIN metadata_fields mf ON mt.id = mf.tableId \nGROUP BY mt.tableName, mt.description\nORDER BY mt.tableName;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 26Ls9jmxqFtfiZr.root --database Xr6iidL4xxRqprpkkKRwbD --execute SELECT mt.tableName, COUNT(mf.id) as fieldCount, mt.description\nFROM metadata_tables mt \nLEFT JOIN metadata_fields mf ON mt.id = mf.tableId \nGROUP BY mt.tableName, mt.description\nORDER BY mt.tableName;",
+  "rows": [
+    {
+      "tableName": "CustTable",
+      "fieldCount": "193",
+      "description": "D365 F&O table: CustTable"
+    },
+    {
+      "tableName": "SalesLine",
+      "fieldCount": "198",
+      "description": "D365 F&O table: SalesLine"
+    },
+    {
+      "tableName": "SalesTable",
+      "fieldCount": "185",
+      "description": "D365 F&O table: SalesTable"
+    }
+  ],
+  "messages": [],
+  "stdout": "tableName\tfieldCount\tdescription\nCustTable\t193\tD365 F&O table: CustTable\nSalesLine\t198\tD365 F&O table: SalesLine\nSalesTable\t185\tD365 F&O table: SalesTable\n",
+  "stderr": "",
+  "execution_time_ms": 58
+}

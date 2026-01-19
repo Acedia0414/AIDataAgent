@@ -1,0 +1,26 @@
+SYNTAX ERROR FIX for server/routers.ts line 599
+
+PROBLEM:
+Lines 599-605 contain orphaned code that's not inside any function:
+
+    const { sql, explanation, error, ragSources } = await generateSqlQuery(
+      naturalLanguageQuery,
+      roleNames,
+      ctx.user.id
+    );
+    const plan = await detectMultiStepQuery(naturalLanguageQuery);
+    return plan;
+  }),
+
+SOLUTION:
+Delete lines 599-605 completely (including the blank line at 598).
+
+The code should look like:
+        const classification = await classifyIntent(message, conversationHistory);
+        return classification;
+      }),
+
+  executeMultiStepPlan: protectedProcedure
+    .input(z.object({
+
+This orphaned code was left behind from the previous patch that removed selectedCompany.

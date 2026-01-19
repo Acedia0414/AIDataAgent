@@ -1,0 +1,8 @@
+{
+  "query": "SELECT tableName, COUNT(*) as fieldCount FROM tableFields GROUP BY tableName ORDER BY tableName;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 26Ls9jmxqFtfiZr.root --database Xr6iidL4xxRqprpkkKRwbD --execute SELECT tableName, COUNT(*) as fieldCount FROM tableFields GROUP BY tableName ORDER BY tableName;",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1146 (42S02) at line 1: Table 'xr6iidl4xxrqprpkkkrwbd.tableFields' doesn't exist"
+  ]
+}

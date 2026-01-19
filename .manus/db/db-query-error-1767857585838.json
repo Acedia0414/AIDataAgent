@@ -1,0 +1,8 @@
+{
+  "query": "SELECT tableName, COUNT(*) as fieldCount FROM metadata_fields GROUP BY tableName ORDER BY tableName LIMIT 20;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 26Ls9jmxqFtfiZr.root --database Xr6iidL4xxRqprpkkKRwbD --execute SELECT tableName, COUNT(*) as fieldCount FROM metadata_fields GROUP BY tableName ORDER BY tableName LIMIT 20;",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 1: Unknown column 'tablename' in 'group statement'"
+  ]
+}
