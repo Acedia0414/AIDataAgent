@@ -443,20 +443,26 @@ export async function generateSqlQuery(
     // Retrieve relevant context from RAG knowledge base
     let ragContext = "";
     let ragSources: Array<{ documentId: string; filename: string }> = [];
-    try {
-      const orchestrator = getDefaultRAGOrchestrator();
-      const retrieved = await orchestrator.retrieveContext(naturalLanguageQuery, 3);
-      if (retrieved.chunks.length > 0) {
+    
+    // Check if RAG is disabled
+    if (process.env.ENABLE_RAG === 'false') {
+      console.log('[Query Generator] RAG disabled via ENABLE_RAG=false, skipping RAG retrieval');
+    } else {
+      try {
+        const orchestrator = getDefaultRAGOrchestrator();
+        const retrieved = await orchestrator.retrieveContext(naturalLanguageQuery, 3);
+        if (retrieved.chunks.length > 0) {
         ragContext = `\n\n# Additional Context from Knowledge Base\n\n`;
         ragContext += retrieved.chunks
           .map((chunk, i) => `## Context ${i + 1} (from ${chunk.source}):\n${chunk.text}`)
           .join("\n\n");
         ragContext += `\n\nUse this context to better understand the business logic, data relationships, and domain-specific terminology.\n`;
         ragSources = retrieved.sources;
+        }
+      } catch (error) {
+        console.warn("RAG context retrieval failed:", error);
+        // Continue without RAG context
       }
-    } catch (error) {
-      console.warn("RAG context retrieval failed:", error);
-      // Continue without RAG context
     }
 
     // Build system prompt using centralized configuration

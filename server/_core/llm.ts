@@ -2,6 +2,51 @@ import { ENV } from "./env";
 import { getActiveLlmConfig } from "../db-config";
 import { decrypt } from "../encryption";
 
+// --- 1. 代理与安全配置 ---
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    // 使用动态导入避免 ES 模块问题
+    import('undici').then(({ ProxyAgent, setGlobalDispatcher }) => {
+      const proxyAgent = new ProxyAgent('http://127.0.0.1:7890');
+      setGlobalDispatcher(proxyAgent);
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+      console.log("[LLM] Proxy: Global 7890 proxy enabled, SSL verification disabled.");
+    }).catch((error) => {
+      console.warn("[LLM] Failed to setup proxy:", error instanceof Error ? error.message : String(error));
+    });
+  } catch (error) {
+    console.warn("[LLM] Proxy setup error:", error instanceof Error ? error.message : String(error));
+  }
+}
+
+// Helper functions for Google AI API
+const normalizeContentToText = (content: any): string => {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map((item) => {
+      if (typeof item === "string") return item;
+      if (item?.type === "text") return item.text;
+      return "";
+    }).join("");
+  }
+  if (content?.type === "text") return content.text;
+  return "";
+};
+
+const stripMarkdownJson = (text: string): string => {
+  // Remove Markdown code block markers if present
+  const cleaned = text.replace(/^```(?:json)?\s*\n?|\n?```$/g, "").trim();
+  
+  try {
+    // Validate that it's valid JSON
+    JSON.parse(cleaned);
+    return cleaned;
+  } catch {
+    // If not valid JSON, return original text
+    return text;
+  }
+};
+
 export type Role = "system" | "user" | "assistant" | "tool" | "function";
 
 export type TextContent = {
@@ -293,6 +338,89 @@ const normalizeResponseFormat = ({
   };
 };
 
+// Google AI Studio API integration
+async function invokeGoogleAI(params: InvokeParams & {
+  temperature: number;
+  model: string;
+  apiKey: string;
+}): Promise<InvokeResult> {
+  const {
+    messages,
+    model,
+    apiKey,
+    temperature,
+    maxTokens,
+    max_tokens,
+  } = params;
+
+  const cleanModel = model.replace(/^models\//, "");
+  const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
+
+  const systemMsg = messages.find(m => m.role === "system");
+  const chatHistory = messages.filter(m => m.role !== "system");
+
+  const googleBody: any = {
+    contents: chatHistory.map(m => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: normalizeContentToText(m.content) }]
+    })),
+    generationConfig: {
+      temperature: temperature,
+      maxOutputTokens: maxTokens || max_tokens || 32768,
+      topP: 0.95,
+      // 关键：强制要求 JSON 输出
+      responseMimeType: "application/json",
+    }
+  };
+
+  if (systemMsg) {
+    googleBody.system_instruction = {
+      parts: [{ text: normalizeContentToText(systemMsg.content) }]
+    };
+  }
+
+  console.log(`[LLM] Calling Google AI Studio: ${cleanModel}`);
+
+  const response = await fetch(googleUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(googleBody),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Google API Error: ${response.status} ${await response.text()}`);
+  }
+
+  const gJson = await response.json();
+
+  // 【核心改动】获取原始文本并剥离 Markdown 标签
+  let rawText = "";
+  if (gJson.candidates?.[0]?.content?.parts) {
+    rawText = gJson.candidates[0].content.parts
+      .map((p: any) => p.text || "")
+      .join("");
+  }
+
+  // 自动清洗结果，确保返回的是纯净的 JSON 字符串
+  const outText = stripMarkdownJson(rawText);
+
+  return {
+    id: `google-${Date.now()}`,
+    created: Math.floor(Date.now() / 1000),
+    model: model,
+    choices: [{
+      index: 0,
+      message: { role: "assistant", content: outText },
+      finish_reason: "stop"
+    }],
+    usage: {
+      prompt_tokens: gJson.usageMetadata?.promptTokenCount || 0,
+      completion_tokens: gJson.usageMetadata?.candidatesTokenCount || 0,
+      total_tokens: gJson.usageMetadata?.totalTokenCount || 0,
+    }
+  } as InvokeResult;
+}
+
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   await assertApiKey();
 
@@ -347,7 +475,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
 
   const payload: Record<string, unknown> = {
     model: activeModel,
-    messages: messages.map(normalizeMessage),
+    messages: messages?.map(normalizeMessage) || [],
     max_tokens: activeMaxTokens,
     temperature: activeTemperature,
   };
@@ -384,7 +512,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
 
   const apiUrl = await resolveApiUrl();
   // Log sanitized request metadata for observability (no full content to avoid spills)
-  const messagePreview = messages.map((m, idx) => {
+  const messagePreview = messages?.map((m, idx) => {
     const text = Array.isArray(m.content)
       ? m.content.map((c: any) => (typeof c === "string" ? c : c.text || "")).join(" ")
       : typeof m.content === "string"
@@ -401,7 +529,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     url: apiUrl,
     model: activeModel,
     configSource, // NEW: Track where the config came from
-    messages: messages.length,
+    messages: messages?.length || 0,
     tools: tools?.length || 0,
     maxTokens: activeMaxTokens,
     temperature: activeTemperature,
@@ -418,6 +546,25 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
 
   try {
     const startTime = Date.now();
+    
+    // Check if we should use Google AI Studio API
+    const activeConfig = await getActiveLlmConfig();
+    if (activeConfig?.provider === "google_ai") {
+      return await invokeGoogleAI({
+        messages,
+        tools,
+        toolChoice,
+        outputSchema,
+        output_schema,
+        responseFormat,
+        response_format,
+        maxTokens: params.maxTokens || params.max_tokens,
+        temperature: activeTemperature,
+        model: activeModel,
+        apiKey: activeApiKey!,
+      });
+    }
+    
     const response = await fetch(apiUrl, {
       method: "POST",
       headers: {

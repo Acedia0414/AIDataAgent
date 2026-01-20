@@ -104,7 +104,20 @@ export class XenovaEmbeddingProvider implements EmbeddingProvider {
     this.loading = true;
     try {
       const { pipeline } = await import("@xenova/transformers");
-      this.pipeline = await pipeline("feature-extraction", this.model);
+      console.log(`[RAG] Loading embedding model: ${this.model}`);
+      this.pipeline = await pipeline("feature-extraction", this.model, {
+        // Add timeout and retry options
+        progress_callback: (progress: any) => {
+          if (progress.status === 'downloading') {
+            console.log(`[RAG] Downloading model: ${Math.round(progress.progress * 100)}%`);
+          }
+        }
+      });
+      console.log(`[RAG] Embedding model loaded successfully`);
+    } catch (error) {
+      console.error("[RAG] Failed to load embedding model:", error);
+      // Don't throw error, allow fallback to keyword matching
+      this.pipeline = null;
     } finally {
       this.loading = false;
     }

@@ -302,9 +302,9 @@ export type InsertDatabaseConnection = typeof databaseConnections.$inferInsert;
  */
 export const llmConfigurations = mysqlTable("llm_configurations", {
   id: int("id").autoincrement().primaryKey(),
-  provider: mysqlEnum("provider", ["openai", "azure_openai", "manus_builtin", "custom"]).notNull(),
+  provider: mysqlEnum("provider", ["openai", "azure_openai", "manus_builtin", "custom", "google", "google_ai"]).notNull(),
   apiKey: text("apiKey"), // Encrypted
-  endpoint: varchar("endpoint", { length: 500 }), // For Azure OpenAI
+  endpoint: varchar("endpoint", { length: 500 }), // For Azure OpenAI or Custom
   deploymentName: varchar("deploymentName", { length: 255 }), // For Azure OpenAI
   model: varchar("model", { length: 100 }).notNull(), // gpt-4, gpt-3.5-turbo, etc.
   temperature: int("temperature").default(70), // 0-100, stored as integer (divide by 100)

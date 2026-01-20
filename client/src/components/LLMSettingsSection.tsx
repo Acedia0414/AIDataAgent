@@ -15,7 +15,7 @@ import { toast } from "sonner";
 import { Loader2, Check, X, Plus, Trash2, Settings2, Edit2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
-type LLMProvider = "manus_builtin" | "openai" | "azure_openai" | "custom";
+type LLMProvider = "manus_builtin" | "openai" | "azure_openai" | "custom" | "google" | "google_ai";
 
 interface LLMConfig {
     id: number;
@@ -149,6 +149,11 @@ export function LLMSettingsSection({ isEmbedded = false }: LLMSettingsSectionPro
             return;
         }
 
+        if (provider === "google_ai" && (!apiKey || apiKey.trim().length === 0)) {
+            toast.error("API key is required for Google AI Studio");
+            return;
+        }
+
         createMutation.mutate({
             provider,
             model,
@@ -181,6 +186,11 @@ export function LLMSettingsSection({ isEmbedded = false }: LLMSettingsSectionPro
 
         if (provider === "azure_openai" && (!deploymentName || deploymentName.trim().length === 0)) {
             toast.error("Deployment name is required for Azure OpenAI");
+            return;
+        }
+
+        if (provider === "google_ai" && (!apiKey || apiKey.trim().length === 0)) {
+            toast.error("API key is required for Google AI Studio");
             return;
         }
 
@@ -228,6 +238,10 @@ export function LLMSettingsSection({ isEmbedded = false }: LLMSettingsSectionPro
                 return "OpenAI";
             case "azure_openai":
                 return "Azure OpenAI";
+            case "google":
+                return "Google Gemini";
+            case "google_ai":
+                return "Google AI Studio";
             case "custom":
                 return "Custom Provider";
         }
@@ -418,6 +432,7 @@ export function LLMSettingsSection({ isEmbedded = false }: LLMSettingsSectionPro
                                     <SelectItem value="manus_builtin">Manus Built-in</SelectItem>
                                     <SelectItem value="openai">OpenAI</SelectItem>
                                     <SelectItem value="azure_openai">Azure OpenAI</SelectItem>
+                                    <SelectItem value="google_ai">Google AI Studio</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -474,6 +489,19 @@ export function LLMSettingsSection({ isEmbedded = false }: LLMSettingsSectionPro
                                         <SelectItem value="gpt-4">GPT-4 (most advanced)</SelectItem>
                                         <SelectItem value="gpt-4-turbo">GPT-4 Turbo (faster)</SelectItem>
                                         <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo (cheapest)</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            ) : provider === "google_ai" ? (
+                                <Select value={model} onValueChange={setModel}>
+                                    <SelectTrigger>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
+                                        <SelectItem value="gemini-2.0-flash-exp">Gemini 2.0 Flash (Experimental)</SelectItem>
+                                        <SelectItem value="gemini-1.5-pro">Gemini 1.5 Pro</SelectItem>
+                                        <SelectItem value="gemini-1.5-flash">Gemini 1.5 Flash</SelectItem>
+                                        <SelectItem value="gemini-1.0-pro">Gemini 1.0 Pro</SelectItem>
                                     </SelectContent>
                                 </Select>
                             ) : (

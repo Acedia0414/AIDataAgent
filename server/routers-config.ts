@@ -261,7 +261,7 @@ export const configRouter = router({
    */
   createLlmConfig: protectedProcedure
     .input(z.object({
-      provider: z.enum(["openai", "azure_openai", "manus_builtin", "custom"]),
+      provider: z.enum(["openai", "azure_openai", "manus_builtin", "custom", "google", "google_ai"]),
       apiKey: z.string().optional(),
       endpoint: z.string().optional(),
       deploymentName: z.string().optional(),
@@ -283,7 +283,7 @@ export const configRouter = router({
   updateLlmConfig: protectedProcedure
     .input(z.object({
       id: z.number(),
-      provider: z.enum(["openai", "azure_openai", "manus_builtin", "custom"]).optional(),
+      provider: z.enum(["openai", "azure_openai", "manus_builtin", "custom", "google", "google_ai"]).optional(),
       apiKey: z.string().optional(),
       endpoint: z.string().optional(),
       deploymentName: z.string().optional(),
@@ -366,7 +366,7 @@ export const configRouter = router({
   testLlmConfig: protectedProcedure
     .input(z.object({
       id: z.number().optional(), // If testing existing config
-      provider: z.enum(["openai", "azure_openai", "manus_builtin", "custom"]),
+      provider: z.enum(["openai", "azure_openai", "manus_builtin", "custom", "google", "google_ai"]),
       apiKey: z.string().optional(),
       endpoint: z.string().optional(),
       deploymentName: z.string().optional(),
@@ -419,6 +419,13 @@ export const configRouter = router({
           return {
             success: false,
             message: "API key, endpoint, and deployment name are required for Azure OpenAI",
+          };
+        }
+
+        if (provider === "google_ai" && !apiKey) {
+          return {
+            success: false,
+            message: "API key is required for Google AI Studio",
           };
         }
 
