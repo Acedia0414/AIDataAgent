@@ -11,6 +11,7 @@ interface ParsedMetadata {
   tableName: string;
   description: string;
   businessPurpose: string;
+  tableLabel?: string; // Enhanced table label
   fields: Array<{
     fieldName: string;
     dataType: string;
@@ -22,6 +23,12 @@ interface ParsedMetadata {
     enumType: string | null;
     label: string | null;
     translatedLabel: string | null;
+    fieldLabel?: string; // Enhanced field label
+    enumDetails?: Array<{ // Enhanced enum details
+      value: string;
+      label: string;
+      description?: string;
+    }>;
   }>;
   fieldGroups: Array<{
     groupName: string;
@@ -140,7 +147,7 @@ export function MetadataTree({ metadata }: MetadataTreeProps) {
       {/* Root: Table */}
       <TreeNode
         icon={<TableIcon className="h-4 w-4" />}
-        label={`${metadata.tableName} (sys) [Application Suite]`}
+        label={`${metadata.tableName} ${metadata.tableLabel ? `(${metadata.tableLabel})` : ''} (sys) [Application Suite]`}
         defaultExpanded={true}
         level={0}
       >
@@ -155,10 +162,62 @@ export function MetadataTree({ metadata }: MetadataTreeProps) {
             <TreeNode
               key={idx}
               icon={<Key className="h-3 w-3" />}
-              label={`${field.fieldName} (${field.extendedDataType || field.dataType})`}
+              label={`${field.fieldName} (${field.fieldLabel || field.extendedDataType || field.dataType})`}
               isLeaf={true}
               level={2}
             />
+          ))}
+        </TreeNode>
+
+        {/* Enhanced Fields with Labels Section */}
+        <TreeNode
+          icon={<List className="h-4 w-4" />}
+          label="Enhanced Field Details"
+          badge={metadata.fields.filter(f => f.fieldLabel || f.enumDetails).length.toString()}
+          level={1}
+        >
+          {metadata.fields.filter(field => field.fieldLabel || field.enumDetails).map((field, idx) => (
+            <TreeNode
+              key={`enhanced-${idx}`}
+              icon={<Key className="h-3 w-3" />}
+              label={`${field.fieldName}${field.fieldLabel ? ` - ${field.fieldLabel}` : ''}`}
+              level={2}
+            >
+              {/* Show field type and label */}
+              <TreeNode
+                icon={<span className="text-xs">→</span>}
+                label={`Type: ${field.dataType}`}
+                isLeaf={true}
+                level={3}
+              />
+              {field.fieldLabel && (
+                <TreeNode
+                  icon={<span className="text-xs">→</span>}
+                  label={`Label: ${field.fieldLabel}`}
+                  isLeaf={true}
+                  level={3}
+                />
+              )}
+              
+              {/* Show enum values if available */}
+              {field.enumDetails && field.enumDetails.length > 0 && (
+                <TreeNode
+                  icon={<span className="text-xs">▼</span>}
+                  label={`Enum Values (${field.enumDetails.length})`}
+                  level={3}
+                >
+                  {field.enumDetails.map((enumVal, enumIdx) => (
+                    <TreeNode
+                      key={enumIdx}
+                      icon={<span className="text-xs">•</span>}
+                      label={`[${enumVal.value}] ${enumVal.label}${enumVal.description ? ` - ${enumVal.description}` : ''}`}
+                      isLeaf={true}
+                      level={4}
+                    />
+                  ))}
+                </TreeNode>
+              )}
+            </TreeNode>
           ))}
         </TreeNode>
 

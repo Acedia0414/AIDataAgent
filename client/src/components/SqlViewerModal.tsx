@@ -38,12 +38,47 @@ export function SqlViewerModal({
 }: SqlViewerModalProps) {
   const [copied, setCopied] = useState(false);
 
-  const formattedSql = format(sql, {
-    language: "tsql", // T-SQL formatting for SQL Server
-    tabWidth: 2,
-    keywordCase: "upper",
-    linesBetweenQueries: 2,
-  });
+  const formatSqlSafely = (sql: string) => {
+    try {
+      // Basic SQL validation before formatting
+      if (!sql || typeof sql !== 'string') {
+        console.warn("Invalid SQL input:", sql);
+        return sql || '';
+      }
+
+      // Check for common syntax issues
+      const trimmedSql = sql.trim();
+      if (!trimmedSql.toUpperCase().startsWith('SELECT')) {
+        console.warn("SQL doesn't start with SELECT:", trimmedSql.substring(0, 50));
+      }
+
+      // Check for unmatched quotes
+      const singleQuotes = (trimmedSql.match(/'/g) || []).length;
+      const doubleQuotes = (trimmedSql.match(/"/g) || []).length;
+      if (singleQuotes % 2 !== 0 || doubleQuotes % 2 !== 0) {
+        console.warn("Unmatched quotes detected in SQL:", trimmedSql);
+      }
+
+      return format(sql, {
+        language: "tsql", // T-SQL formatting for SQL Server
+        tabWidth: 2,
+        keywordCase: "upper",
+        linesBetweenQueries: 2,
+      });
+    } catch (error) {
+      console.error("SQL formatting error:", error);
+      console.error("Original SQL:", sql);
+      console.error("Error details:", (error as Error).message);
+      
+      // Show user-friendly error message
+      toast.error("SQL formatting failed. Showing original query.");
+      
+      // Return original SQL if formatting fails
+      return sql;
+    }
+  };
+
+  const formattedSql = formatSqlSafely(sql);
 
   const handleCopy = async () => {
     try {

@@ -27,6 +27,7 @@ import {
   X,
   ListChecks,
   TrendingUp,
+  Shield,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useState } from "react";
@@ -75,6 +76,12 @@ const navItems: NavItem[] = [
     label: "Analytics",
     description: "View multi-step execution metrics and insights",
     icon: <TrendingUp className="h-5 w-5" />,
+  },
+  {
+    path: "/table-rules",
+    label: "Table Rules",
+    description: "Manage AI query generation rules for tables",
+    icon: <Shield className="h-5 w-5" />,
   },
   {
     path: "/settings",

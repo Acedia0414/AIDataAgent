@@ -16,6 +16,7 @@ import {
   userSecurityRoles,
   azureAdGroupMappings,
   companies,
+  labels,
   InsertMetadataTable,
   InsertMetadataField,
   InsertTableRelationship,
@@ -29,6 +30,7 @@ import {
   InsertUserSecurityRole,
   InsertAzureAdGroupMapping,
   InsertCompany,
+  InsertLabel,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 

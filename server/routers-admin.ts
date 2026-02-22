@@ -45,4 +45,51 @@ export const adminRouter = router({
       
       return { success: true };
     }),
+
+  // Table Rules management
+  tableRules: router({
+    list: adminProcedure.query(async () => {
+      const { tableRulesService } = await import('./tableRulesService.cjs');
+      return await tableRulesService.getAllRules();
+    }),
+
+    get: adminProcedure
+      .input(z.object({ tableName: z.string() }))
+      .query(async ({ input }) => {
+        const { tableRulesService } = await import('./tableRulesService.cjs');
+        return await tableRulesService.getTableRule(input.tableName);
+      }),
+
+    create: adminProcedure
+      .input(z.object({
+        tableName: z.string(),
+        tableRule: z.string(),
+        description: z.string().optional(),
+        priority: z.number().default(0),
+      }))
+      .mutation(async ({ input }) => {
+        const { tableRulesService } = await import('./tableRulesService.cjs');
+        await tableRulesService.addTableRule(input.tableName, input.tableRule, input.description, input.priority);
+        return { success: true };
+      }),
+
+    updateStatus: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        isActive: z.boolean(),
+      }))
+      .mutation(async ({ input }) => {
+        const { tableRulesService } = await import('./tableRulesService.cjs');
+        await tableRulesService.updateRuleStatus(input.id, input.isActive);
+        return { success: true };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const { tableRulesService } = await import('./tableRulesService.cjs');
+        await tableRulesService.deleteRule(input.id);
+        return { success: true };
+      }),
+  })
 });

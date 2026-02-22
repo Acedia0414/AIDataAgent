@@ -19,6 +19,7 @@ import RAGProgress from "./pages/RAGProgress";
 import LLMSettings from "./pages/LLMSettings";
 import DatabaseSettings from "./pages/DatabaseSettings";
 import Admin from "./pages/Admin";
+import TableRules from "./pages/TableRules";
 
 function Router() {
   return (
@@ -37,6 +38,7 @@ function Router() {
       <Route path="/retry-limit-settings" component={RetryLimitSettings} />
       <Route path={"/settings"} component={Settings} />
       <Route path={"/admin"} component={Admin} />
+      <Route path={"/table-rules"} component={TableRules} />
       <Route path={"/llm-settings"} component={LLMSettings} />
       <Route path={"/database-settings"} component={DatabaseSettings} />
       <Route path={"/404"} component={NotFound} />

@@ -2,10 +2,10 @@ import { ENV } from "./env";
 import { getActiveLlmConfig } from "../db-config";
 import { decrypt } from "../encryption";
 
-// --- 1. 代理与安全配置 ---
+// --- 1. Proxy and Security Configuration ---
 if (process.env.NODE_ENV !== 'production') {
   try {
-    // 使用动态导入避免 ES 模块问题
+    // Use dynamic imports to avoid ES module issues
     import('undici').then(({ ProxyAgent, setGlobalDispatcher }) => {
       const proxyAgent = new ProxyAgent('http://127.0.0.1:7890');
       setGlobalDispatcher(proxyAgent);
@@ -368,7 +368,7 @@ async function invokeGoogleAI(params: InvokeParams & {
       temperature: temperature,
       maxOutputTokens: maxTokens || max_tokens || 32768,
       topP: 0.95,
-      // 关键：强制要求 JSON 输出
+      // Key: Force JSON output
       responseMimeType: "application/json",
     }
   };
@@ -393,7 +393,7 @@ async function invokeGoogleAI(params: InvokeParams & {
 
   const gJson = await response.json();
 
-  // 【核心改动】获取原始文本并剥离 Markdown 标签
+  // [Core Change] Get original text and strip Markdown tags
   let rawText = "";
   if (gJson.candidates?.[0]?.content?.parts) {
     rawText = gJson.candidates[0].content.parts
@@ -401,7 +401,7 @@ async function invokeGoogleAI(params: InvokeParams & {
       .join("");
   }
 
-  // 自动清洗结果，确保返回的是纯净的 JSON 字符串
+  // Auto-clean result to ensure pure JSON string is returned
   const outText = stripMarkdownJson(rawText);
 
   return {

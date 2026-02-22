@@ -6,13 +6,21 @@ import { z } from "zod";
 import * as db from "./db";
 import { parseD365Metadata, isValidD365XML } from "./metadataParser";
 import { parseD365MetadataV2 } from "./metadataParserV2";
-import { generateSqlQuery } from "./queryGenerator";
+import { generateSqlQuery, generateSqlQueryWithConfirmation } from "./queryGenerator";
 import { classifyIntent } from "./intentClassifier";
 import { analyzeQueryPreflight } from "./queryPreflight";
+import { queryCacheService } from "./queryCacheService";
+import { getDb } from "./db";
+import { queryHistory } from "../drizzle/schema";
+import { sql } from "drizzle-orm";
 import { readFileSync, existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { generateQueryReview, formatResultPreview } from "./queryPipeline";
 import { executeQuery, testConnection } from "./queryExecutor";
+import { labelService } from "./labelService";
+import { fieldFeedbackService, FieldFeedback } from "./fieldFeedbackService";
+import { labelsRouter } from "./routers-labels";
+import commentsRouter from "./routers/commentsRouter";
 import { exportToExcel, generateExcelFilename } from "./excelExporter";
 import { storagePut } from "./storage";
 import { generateResultInsights } from "./resultInsightsGenerator";
@@ -20,6 +28,9 @@ import { refineInferredRelationshipsForTable } from "./relationshipRefinementPro
 import { knowledgeBaseRouter } from "./routers-knowledge";
 import { configRouter } from "./routers-config";
 import { adminRouter } from "./routers-admin";
+import { enhancedTableMetadataService } from "./enhancedTableMetadataService.cjs";
+import { systemPromptGenerator } from "./systemPromptGenerator.cjs";
+import { technicalMetadataPromptGenerator } from "./simpleTechnicalPromptGenerator.cjs";
 import { adapterRegistry } from "./database/adapters";
 
 import { metadataRegistry } from "./metadataRegistry";
@@ -37,12 +48,381 @@ const summarizeLlmError = (error: unknown): string => {
   return "The AI call failed. Please try again or check the AI service settings.";
 };
 
+// 🆕 Query router definition
+const query = router({
+  submitFeedback: protectedProcedure
+    .input(z.object({
+      queryId: z.number().optional(),
+      naturalLanguageQuery: z.string(),
+      generatedSql: z.string(),
+      satisfied: z.boolean(),
+      comment: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const { queryId, naturalLanguageQuery, generatedSql, satisfied, comment } = input;
+      console.log(`[Query Feedback] User ${ctx.user.id} feedback: ${satisfied ? 'satisfied' : 'not satisfied'}`);
+      
+      // 如果用户满意，Save to cache
+      if (satisfied) {
+        try {
+          await queryCacheService.saveQuery(
+            ctx.user.id,
+            naturalLanguageQuery,
+            generatedSql,
+            'success'
+          );
+          console.log(`[Query Feedback] ✅ Saved satisfied query to cache`);
+        } catch (error) {
+          console.warn(`[Query Feedback] Failed to save to cache:`, error);
+        }
+      } else {
+        console.log(`[Query Feedback] ❌ User not satisfied, not saving to cache`);
+        // If not satisfied, can optionally save to failure cache for learning
+        if (comment && comment.trim()) {
+          try {
+            await queryCacheService.saveQuery(
+              ctx.user.id,
+              naturalLanguageQuery,
+              generatedSql,
+              'error',
+              undefined,
+              comment
+            );
+            console.log(`[Query Feedback] 💾 Saved unsatisfied query to failure cache for learning`);
+          } catch (error) {
+            console.warn(`[Query Feedback] Failed to save to failure cache:`, error);
+          }
+        }
+      }
+
+      return {
+        success: true,
+        message: satisfied ? "Thank you for your feedback! We'll save this query for future reference." : "Thank you for your feedback! We'll use this to improve our system."
+      };
+    }),
+
+    // 🆕 System Prompt generation endpoint
+    getSystemPrompt: protectedProcedure
+      .input(z.object({
+        useCache: z.boolean().optional().default(true),
+        limitAreas: z.number().optional(),
+      }))
+      .query(async ({ input }) => {
+        try {
+          console.log('[System Prompt] Generating dynamic system prompt...');
+          
+          let prompt;
+          if (input.limitAreas) {
+            // Generate test prompt with limited areas
+            prompt = await systemPromptGenerator.generateTestSystemPrompt(input.limitAreas);
+          } else {
+            // Generate full system prompt
+            prompt = await systemPromptGenerator.generateSystemPrompt();
+          }
+          
+          console.log(`[System Prompt] ✅ Generated prompt (${prompt.length} chars)`);
+          
+          return {
+            success: true,
+            prompt,
+            cacheStatus: systemPromptGenerator.getCacheStatus(),
+            metadata: {
+              length: prompt.length,
+              lines: prompt.split('\n').length,
+              generatedAt: new Date().toISOString(),
+            }
+          };
+        } catch (error) {
+          console.error('[System Prompt] Error generating prompt:', error);
+          throw new Error(error instanceof Error ? error.message : 'Failed to generate system prompt');
+        }
+      }),
+
+    // 🆕 System Prompt cache management
+    refreshSystemPromptCache: protectedProcedure
+      .mutation(async () => {
+        try {
+          console.log('[System Prompt] Refreshing cache...');
+          await systemPromptGenerator.refreshCache();
+          
+          const cacheStatus = systemPromptGenerator.getCacheStatus();
+          console.log('[System Prompt] ✅ Cache refreshed');
+          
+          return {
+            success: true,
+            cacheStatus,
+            refreshedAt: new Date().toISOString(),
+          };
+        } catch (error) {
+          console.error('[System Prompt] Error refreshing cache:', error);
+          throw new Error(error instanceof Error ? error.message : 'Failed to refresh cache');
+        }
+      }),
+
+    // 🆕 System Prompt cache status
+    getSystemPromptCacheStatus: protectedProcedure
+      .query(async () => {
+        try {
+          const cacheStatus = systemPromptGenerator.getCacheStatus();
+          
+          return {
+            success: true,
+            cacheStatus,
+            timestamp: new Date().toISOString(),
+          };
+        } catch (error) {
+          console.error('[System Prompt] Error getting cache status:', error);
+          throw new Error(error instanceof Error ? error.message : 'Failed to get cache status');
+        }
+      }),
+
+    // 🆕 Technical Metadata Prompt generation (Phase 2)
+    getTechnicalPrompt: protectedProcedure
+      .input(z.object({
+        tableNames: z.array(z.string()),
+        options: z.object({
+          dataAreaId: z.string().optional().default('usmf'),
+          limit: z.number().optional().default(50),
+          includeSystemTables: z.boolean().optional().default(false)
+        }).optional()
+      }))
+      .query(async ({ input }) => {
+        try {
+          console.log(`[Technical Prompt] Generating for tables: [${input.tableNames.join(', ')}]`);
+          
+          const technicalPrompt = await technicalMetadataPromptGenerator.generateTechnicalPrompt(
+            input.tableNames, 
+            input.options || {}
+          );
+          
+          console.log(`[Technical Prompt] ✅ Generated technical prompt (${technicalPrompt.length} chars)`);
+          
+          return {
+            success: true,
+            prompt: technicalPrompt,
+            metadata: {
+              tableCount: input.tableNames.length,
+              promptLength: technicalPrompt.length,
+              generatedAt: new Date().toISOString(),
+              options: input.options || {}
+            },
+            cacheStats: technicalMetadataPromptGenerator.getCacheStats()
+          };
+        } catch (error) {
+          console.error('[Technical Prompt] Error generating technical prompt:', error);
+          throw new Error(error instanceof Error ? error.message : 'Failed to generate technical prompt');
+        }
+      }),
+
+    // 🆕 Technical Metadata cache management
+    refreshTechnicalPromptCache: protectedProcedure
+      .mutation(async () => {
+        try {
+          console.log('[Technical Prompt] Refreshing cache...');
+          technicalMetadataPromptGenerator.clearCache();
+          
+          const cacheStats = technicalMetadataPromptGenerator.getCacheStats();
+          console.log('[Technical Prompt] ✅ Cache refreshed');
+          
+          return {
+            success: true,
+            cacheStats,
+            refreshedAt: new Date().toISOString(),
+          };
+        } catch (error) {
+          console.error('[Technical Prompt] Error refreshing cache:', error);
+          throw new Error(error instanceof Error ? error.message : 'Failed to refresh cache');
+        }
+      }),
+
+    // 🆕 Technical Metadata cache status
+    getTechnicalPromptCacheStatus: protectedProcedure
+      .query(async () => {
+        try {
+          const cacheStats = technicalMetadataPromptGenerator.getCacheStats();
+          
+          return {
+            success: true,
+            cacheStats,
+            timestamp: new Date().toISOString(),
+          };
+        } catch (error) {
+          console.error('[Technical Prompt] Error getting cache status:', error);
+          throw new Error(error instanceof Error ? error.message : 'Failed to get cache status');
+        }
+      }),
+      
+    // 🆕 Clear Query Cache
+    clearQueryCache: protectedProcedure
+      .input(z.object({
+        query: z.string().optional(),
+        clearAll: z.boolean().optional().default(false)
+      }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          if (input.clearAll) {
+            // Clear all cache for the user
+            await queryCacheService.clearUserCache(ctx.user.id);
+            return { 
+              success: true, 
+              message: 'All cache entries cleared for user',
+              cleared: 'all'
+            };
+          } else if (input.query) {
+            // Clear specific cache entry
+            await queryCacheService.clearSpecificCache(ctx.user.id, input.query);
+            return { 
+              success: true, 
+              message: `Cache cleared for query: ${input.query.substring(0, 50)}...`,
+              cleared: 'specific'
+            };
+          } else {
+            return { 
+              success: false, 
+              message: 'Either provide a query or set clearAll to true' 
+            };
+          }
+        } catch (error) {
+          console.error('[Query Cache] Error clearing cache:', error);
+          throw new Error(error instanceof Error ? error.message : 'Failed to clear cache');
+        }
+      }),
+});
+
 export const appRouter = router({
   // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
   knowledgeBase: knowledgeBaseRouter,
   config: configRouter,
   admin: adminRouter,
+  labels: labelsRouter,
+  
+  // 🆕 Query router
+  query: query,
+  
+  // Field feedback router
+  fieldFeedback: router({
+    submitFeedback: protectedProcedure
+      .input(z.object({
+        originalQuery: z.string(),
+        wrongField: z.string(),
+        correctField: z.string(),
+        tableName: z.string(),
+        businessMeaning: z.string(),
+        userExplanation: z.string().optional()
+      }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const feedback = {
+            ...input,
+            userId: ctx.user.id
+          };
+          
+          const result = await fieldFeedbackService.processFieldFeedback(feedback);
+          return result;
+        } catch (error) {
+          console.error('Error submitting field feedback:', error);
+          throw new Error('Failed to submit field feedback');
+        }
+      }),
+
+    analyzeError: protectedProcedure
+      .input(z.object({
+        originalQuery: z.string(),
+        generatedSQL: z.string(),
+        errorMessage: z.string(),
+        usedTables: z.array(z.string())
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const analysis = await fieldFeedbackService.analyzeAIError(
+            input.originalQuery,
+            input.generatedSQL,
+            input.errorMessage,
+            input.usedTables
+          );
+          return analysis;
+        } catch (error) {
+          console.error('Error analyzing AI error:', error);
+          throw new Error('Failed to analyze AI error');
+        }
+      }),
+
+    getStats: protectedProcedure
+      .query(async () => {
+        try {
+          const stats = await fieldFeedbackService.getFeedbackStats();
+          return stats;
+        } catch (error) {
+          console.error('Error getting feedback stats:', error);
+          throw new Error('Failed to get feedback stats');
+        }
+      })
+  }),
+
+  // Conversational Learning router
+  conversationalLearning: router({
+    generateWithConfirmation: protectedProcedure
+      .input(z.object({
+        query: z.string(),
+        userSecurityRoles: z.array(z.string()).optional()
+      }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const result = await generateSqlQueryWithConfirmation(
+            input.query,
+            input.userSecurityRoles || [],
+            ctx.user.id
+          );
+          return result;
+        } catch (error) {
+          console.error('Error generating SQL with confirmation:', error);
+          throw new Error('Failed to generate SQL with confirmation');
+        }
+      }),
+
+    confirmFields: protectedProcedure
+      .input(z.object({
+        originalQuery: z.string(),
+        confirmedFields: z.array(z.string()),
+        correctedFields: z.array(z.object({
+          originalField: z.string(),
+          correctField: z.string(),
+          businessMeaning: z.string(),
+          userExplanation: z.string().optional()
+        }))
+      }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          // Process field corrections
+          const results = [];
+          
+          for (const correction of input.correctedFields) {
+            const feedback = {
+              originalQuery: input.originalQuery,
+              wrongField: correction.originalField,
+              correctField: correction.correctField,
+              tableName: 'PurchTable', // TODO: Auto-detect table
+              businessMeaning: correction.businessMeaning,
+              userExplanation: correction.userExplanation,
+              userId: ctx.user.id
+            };
+            
+            const result = await fieldFeedbackService.processFieldFeedback(feedback);
+            results.push(result);
+          }
+          
+          return {
+            success: true,
+            message: `Processed ${results.length} field corrections`,
+            results
+          };
+        } catch (error) {
+          console.error('Error confirming fields:', error);
+          throw new Error('Failed to confirm fields');
+        }
+      })
+  }),
 
   // Prompts router for viewing prompt files
   prompts: router({
@@ -248,8 +628,8 @@ export const appRouter = router({
           }
 
           // Process files in parallel batches with concurrency limit
-          const BATCH_SIZE = 10; // Process 10 files concurrently
-          const MAX_CONCURRENT = Math.min(BATCH_SIZE, Math.max(2, Math.floor(files.length / 100))); // Dynamic based on file count
+          const BATCH_SIZE = 50; // Increased from 10 to 50 for better performance
+          const MAX_CONCURRENT = Math.min(BATCH_SIZE, Math.max(5, Math.min(50, Math.ceil(files.length / 20)))); // Better dynamic calculation
 
           console.log(`[Bulk Metadata Upload] Processing ${files.length} files in batches of ${MAX_CONCURRENT}`);
 
@@ -262,7 +642,8 @@ export const appRouter = router({
           // Process each batch in parallel
           for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
             const batch = batches[batchIndex];
-            console.log(`[Bulk Metadata Upload] Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} files)`);
+            const progress = Math.round(((batchIndex) / batches.length) * 100);
+            console.log(`[Bulk Metadata Upload] Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} files) - ${progress}% complete`);
 
             // Process batch in parallel with Promise.allSettled for error resilience
             const batchResults = await Promise.allSettled(
@@ -502,7 +883,7 @@ export const appRouter = router({
           // This allows incremental batch imports without losing existing data.
 
           // Process files in this chunk with concurrency
-          const MAX_CONCURRENT = 5; // Lower concurrency for memory safety
+          const MAX_CONCURRENT = Math.min(20, Math.max(5, Math.ceil(files.length / 50))); // Dynamic concurrency for better performance
           const batches: typeof files[] = [];
           for (let i = 0; i < files.length; i += MAX_CONCURRENT) {
             batches.push(files.slice(i, i + MAX_CONCURRENT));
@@ -761,25 +1142,51 @@ export const appRouter = router({
           const indexes = await db.getIndexesByTableId(table.id);
           const fullTextIndexes = await db.getFullTextIndexesByTableId(table.id);
 
-          // Format as V2 structure
+          // Get enhanced metadata for table and fields
+          let enhancedTable = null;
+          let enhancedFieldsMap = new Map();
+
+          try {
+            enhancedTable = await enhancedTableMetadataService.getEnhancedTableMetadata(input.tableName);
+            if (enhancedTable && enhancedTable.fields) {
+              // Create a map for quick field lookup
+              enhancedFieldsMap = new Map(
+                enhancedTable.fields.map((field: any) => [field.field_name, field])
+              );
+            }
+          } catch (error) {
+            console.log(`[Get Table Metadata V2] Could not get enhanced metadata for table ${input.tableName}`);
+          }
+
+          // Format as V2 structure with enhanced metadata
           return {
             success: true,
             data: {
               tableName: table.tableName,
               description: table.description || '',
               businessPurpose: table.businessPurpose || '',
-              fields: fields.map(f => ({
-                fieldName: f.fieldName,
-                dataType: f.fieldType,
-                sqlType: f.fieldType,
-                extendedDataType: f.businessMeaning,
-                description: f.description || '',
-                isMandatory: false,
-                allowEdit: true,
-                enumType: null,
-                label: null,
-                translatedLabel: null,
-              })),
+              tableLabel: enhancedTable?.table_label || undefined,
+              fields: fields.map(f => {
+                const enhancedField = enhancedFieldsMap.get(f.fieldName);
+                return {
+                  fieldName: f.fieldName,
+                  dataType: enhancedField?.data_type || f.fieldType,
+                  sqlType: f.fieldType,
+                  extendedDataType: f.businessMeaning,
+                  description: f.description || '',
+                  isMandatory: false,
+                  allowEdit: true,
+                  enumType: enhancedField?.data_type === 'Enum' ? 'Enum' : null,
+                  label: f.label || null,
+                  translatedLabel: null,
+                  fieldLabel: enhancedField?.field_label || undefined,
+                  enumDetails: enhancedField?.enum_values ? enhancedField.enum_values.map((enumVal: any) => ({
+                    value: enumVal.enum_value,
+                    label: enumVal.enum_label,
+                    description: enumVal.enum_description
+                  })) : undefined,
+                };
+              }),
               fieldGroups: [],
               relationships: relationships.map(r => ({
                 relationName: r.relationName,
@@ -950,30 +1357,86 @@ export const appRouter = router({
             const existing = await db.getMetadataTableByName(table.tableName);
 
             let tableId: number;
+            
+            // Try to get table label from enhanced metadata service
+            let tableLabelText: string | undefined;
+            try {
+              const enhancedTable = await enhancedTableMetadataService.getEnhancedTableMetadata(table.tableName);
+              if (enhancedTable) {
+                tableLabelText = enhancedTable.table_label;
+              }
+            } catch (error) {
+              console.log(`[Quick Import] Could not get enhanced metadata for table ${table.tableName}, falling back to label service`);
+              // Fallback to original label service
+              tableLabelText = labelService.getTableLabel(table.tableName);
+            }
+            
             if (existing) {
               tableId = existing.id;
               await db.deleteMetadataFieldsByTableId(tableId);
+              // Note: Table update would require updateMetadataTable function
+              // For now, we'll just use the existing table
             } else {
               await db.createMetadataTable({
                 tableName: table.tableName,
                 description: table.description || null,
                 businessPurpose: table.businessPurpose || null,
                 codeLayerInfo: null,
+                label: tableLabelText || null,
+                labelText: tableLabelText || null,
               });
               const created = await db.getMetadataTableByName(table.tableName);
               tableId = created!.id;
             }
 
-            // Insert fields
-            const fieldsData = table.fields.map(field => ({
-              tableId,
-              fieldName: field.fieldName,
-              fieldType: field.dataType,
-              description: field.description || null,
-              businessMeaning: field.extendedDataType || null,
-              isPrimaryKey: field.isPrimaryKey,
-              isForeignKey: false,
-              referencedTable: null,
+            // Insert fields with enhanced metadata label text enhancement
+            const fieldsData = await Promise.all(table.fields.map(async (field) => {
+              // Try to get label text for the field from enhanced metadata
+              let labelText: string | undefined;
+              let enhancedDataType: string | undefined;
+              let enumDetails: any[] | undefined;
+              
+              try {
+                // Get enhanced field metadata
+                const enhancedField = await enhancedTableMetadataService.getEnhancedFieldMetadata(table.tableName, field.fieldName);
+                if (enhancedField) {
+                  labelText = enhancedField.field_label || undefined;
+                  enhancedDataType = enhancedField.data_type || undefined;
+                  
+                  // Get enum values if it's an enum field
+                  if (enhancedField.enum_values && enhancedField.enum_values.length > 0) {
+                    enumDetails = enhancedField.enum_values.map((enumVal: any) => ({
+                      value: enumVal.enum_value,
+                      label: enumVal.enum_label,
+                      description: enumVal.enum_description
+                    }));
+                  }
+                }
+              } catch (error) {
+                console.log(`[Quick Import] Could not get enhanced metadata for field ${table.tableName}.${field.fieldName}, falling back to label service`);
+                
+                // Fallback to original label service
+                if (field.label) {
+                  labelText = labelService.getLabelText(field.label);
+                }
+                if (!labelText) {
+                  labelText = labelService.getLabelText(field.fieldName);
+                }
+              }
+              
+              return {
+                tableId,
+                fieldName: field.fieldName,
+                fieldType: enhancedDataType || field.dataType,
+                description: field.description || null,
+                businessMeaning: field.extendedDataType || null,
+                isPrimaryKey: field.isPrimaryKey,
+                isForeignKey: false,
+                referencedTable: null,
+                label: field.label || null,
+                labelText: labelText || null,
+                enumDetails: enumDetails || null,
+              };
             }));
             if (fieldsData.length > 0) {
               await db.createMetadataFieldsBatch(fieldsData);
@@ -982,13 +1445,13 @@ export const appRouter = router({
             // Insert relationships if any
             if (table.relationships && table.relationships.length > 0) {
               const relData = table.relationships.map(rel => ({
-                tableId,
+                relationName: rel.relationName,
+                sourceTableId: tableId,
                 relatedTable: rel.relatedTable,
                 relationshipType: rel.relationshipType || 'FK',
-                relationName: rel.relationName,
                 cardinality: rel.cardinality || null,
               }));
-              await db.createRelationshipsBatch(relData);
+              await db.createTableRelationshipsBatch(relData);
             }
 
             console.log(`[Quick Import] Imported ${table.tableName}: ${table.fields.length} fields, ${table.relationships?.length || 0} relationships`);
@@ -1255,6 +1718,7 @@ export const appRouter = router({
       }),
   }),
 
+// 🆕 Query router definition
   query: router({
     // Enhanced pipeline endpoints
     classifyIntent: protectedProcedure
@@ -1839,6 +2303,124 @@ export const appRouter = router({
         url,
         filename,
       };
+    }),
+
+  submitFeedback: protectedProcedure
+    .input(z.object({
+      queryId: z.number().optional(),
+      naturalLanguageQuery: z.string(),
+      generatedSql: z.string(),
+      satisfied: z.boolean(),
+      comment: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const { queryId, naturalLanguageQuery, generatedSql, satisfied, comment } = input;
+      console.log(`[Query Feedback] User ${ctx.user.id} feedback: ${satisfied ? 'satisfied' : 'not satisfied'}`);
+      
+      // 如果用户满意，Save to cache
+      if (satisfied) {
+        try {
+          await queryCacheService.saveQuery(
+            ctx.user.id,
+            naturalLanguageQuery,
+            generatedSql,
+            'success'
+          );
+          console.log(`[Query Feedback] ✅ Saved satisfied query to cache`);
+        } catch (error) {
+          console.warn(`[Query Feedback] Failed to save to cache:`, error);
+        }
+      } else {
+        console.log(`[Query Feedback] ❌ User not satisfied, not saving to cache`);
+        // If not satisfied, can optionally save to failure cache for learning
+        if (comment && comment.trim()) {
+          try {
+            await queryCacheService.saveQuery(
+              ctx.user.id,
+              naturalLanguageQuery,
+              generatedSql,
+              'error',
+              undefined,
+              undefined,
+              comment
+            );
+            console.log(`[Query Feedback] 💾 Saved unsatisfied query to failure cache for learning`);
+          } catch (error) {
+            console.warn(`[Query Feedback] Failed to save to failure cache:`, error);
+          }
+        }
+      }
+
+      return {
+        success: true,
+        message: satisfied ? "Thank you for your feedback! We'll save this query for future reference." : "Thank you for your feedback! We'll use this to improve our system."
+      };
+    }),
+
+  clearWrongCache: protectedProcedure
+    .mutation(async ({ ctx }) => {
+      console.log(`[Query Cache] 🧹 User ${ctx.user.id} clearing wrong cache entries`);
+      
+      try {
+        const db = await getDb();
+        if (!db) {
+          throw new Error("Database connection failed");
+        }
+
+        // Delete cache containing generic templates
+        const wrongPatterns = [
+          'WHERE 1=1',
+          'SELECT TOP 50 *',
+          'WorkerPurchId',
+          'WorkerResponsible'
+        ];
+
+        let totalDeleted = 0;
+        
+        for (const pattern of wrongPatterns) {
+          try {
+            const result = await db
+              .delete(queryHistory)
+              .where(
+                sql`generatedSql LIKE ${`%${pattern}%`} AND executionStatus = 'error'`
+              );
+            
+            totalDeleted += Number(result.affectedRows || 0);
+            console.log(`[Query Cache] 🗑️ Deleted ${result.affectedRows} error entries containing "${pattern}"`);
+          } catch (error) {
+            console.log(`[Query Cache] ⚠️ Failed to delete entries containing "${pattern}":`, error);
+          }
+        }
+
+        // Also delete all old cache entries with status 'error' (older than 7 days)
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const oldErrorResult = await db
+          .delete(queryHistory)
+          .where(
+            sql`executionStatus = 'error' AND createdAt < ${sevenDaysAgo.toISOString()}`
+          );
+        
+        totalDeleted += Number(oldErrorResult.affectedRows || 0);
+        console.log(`[Query Cache] 🗑️ Deleted ${oldErrorResult.affectedRows} old error entries (older than 7 days)`);
+
+        // Show remaining cache count
+        const remainingCache = await db.select().from(queryHistory);
+        const successCache = remainingCache.filter(q => q.executionStatus === 'success');
+        const errorCache = remainingCache.filter(q => q.executionStatus === 'error');
+        
+        return {
+          success: true,
+          deleted: totalDeleted,
+          remaining: remainingCache.length,
+          successCache: successCache.length,
+          errorCache: errorCache.length,
+          message: `Cleared ${totalDeleted} wrong cache entries. ${successCache.length} success and ${errorCache.length} error entries remaining.`
+        };
+        
+      } catch (error) {
+        console.error('[Query Cache] ❌ Failed to clear cache:', error);
+        throw new Error(`Failed to clear cache: ${error.message}`);
+      }
     }),
 
   azureSql: router({

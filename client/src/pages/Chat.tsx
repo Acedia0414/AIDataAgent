@@ -31,6 +31,9 @@ import { SlashCommandMenu, generateTemplateCommands, SlashCommand } from "@/comp
 import { ClarificationDialog } from "@/components/ClarificationDialog";
 import { detectQueryAmbiguity } from "@/utils/queryAmbiguityDetector";
 import { MetadataCommandModal } from "@/components/MetadataCommandModal";
+import { QueryFeedback } from "@/components/QueryFeedback";
+import { SqlFeedbackDialog } from "@/components/SqlFeedbackDialog";
+import { useQueryResultPersistence } from "@/hooks/useQueryResultPersistence";
 
 // Helper to extract tables needed from message content
 function extractTablesNeeded(content: string): { cleanContent: string; tables: string[] } {
@@ -142,7 +145,7 @@ export default function Chat() {
 
   const [input, setInput] = useState("");
   const [currentConversationId, setCurrentConversationId] = useState<number | null>(conversationId);
-  const [queryResult, setQueryResult] = useState<any>(null);
+  const { queryResult, setQueryResult, clearQueryResult } = useQueryResultPersistence(currentConversationId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
 
@@ -170,6 +173,7 @@ export default function Chat() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sqlModalOpen, setSqlModalOpen] = useState(false);
+  const [feedbackDialogOpen, setFeedbackDialogOpen] = useState(false);
   const [queryStage, setQueryStage] = useState<QueryStage>("analyzing");
   const [queryStartTime, setQueryStartTime] = useState<number | null>(null);
   const [llmStartTime, setLlmStartTime] = useState<number | null>(null);
@@ -435,9 +439,17 @@ export default function Chat() {
 
   useEffect(() => {
     if (conversationId) {
+      // 切换到新对话时清理状态
+      if (conversationId !== currentConversationId) {
+        clearQueryResult();
+        setQueryStage("analyzing");
+        setIsSubmitting(false);
+        setTotalElapsedMs(undefined);
+        setLlmStartTime(null);
+      }
       setCurrentConversationId(conversationId);
     }
-  }, [conversationId]);
+  }, [conversationId, currentConversationId, clearQueryResult]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
@@ -584,6 +596,31 @@ export default function Chat() {
     navigate("/chat");
   };
 
+  // 处理 SQL 反馈
+  const handleSqlFeedback = (feedback: string) => {
+    if (!currentConversationId || !queryResult?.sql) return;
+    
+    // 获取原始查询（从输入框或最后一条消息）
+    const originalQuery = input.trim() || 
+      (messages && messages.length > 0 ? 
+        messages[messages.length - 1].content : 
+        "Can you provide me all the purchase order without purchasing group");
+    
+    // 创建修改后的查询请求
+    const modifiedQuery = `${originalQuery}\n\n用户反馈: ${feedback}`;
+    
+    // 重新生成 SQL（携带反馈信息）
+    setIsSubmitting(true);
+    setQueryStage("analyzing");
+    
+    generateQuery.mutate({
+      conversationId: currentConversationId,
+      naturalLanguageQuery: modifiedQuery,
+    });
+    
+    toast.info("正在根据您的反馈修改 SQL...");
+  };
+
   const handleExport = () => {
     if (!queryResult?.data || !queryResult?.columns) {
       toast.error("No data to export");
@@ -641,6 +678,8 @@ export default function Chat() {
                     title={conv.title || "Conversation"}
                     onClick={() => {
                       setCurrentConversationId(conv.id);
+                      clearQueryResult(); // 使用持久化 hook 的清理方法
+                      setQueryStage("analyzing"); // 重置查询状态
                       navigate(`/chat/${conv.id}`);
                     }}
                     className={`
@@ -781,6 +820,192 @@ export default function Chat() {
                     }}
                   />
                 ))}
+                {/* SQL Ready to Execute - 在消息流中显示 */}
+                {queryResult?.pendingExecution && queryResult?.sql && (
+                  <div className="flex justify-start w-full">
+                    <div className="w-full max-w-2xl">
+                      <div className="border rounded-lg p-4 bg-blue-50 border-blue-200">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-3">
+                            <h3 className="font-semibold text-blue-800">SQL Ready to Execute</h3>
+                            {queryResult.confidence === "inferred" && (
+                              <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">
+                                ⚠️ Inferred schema
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            <Button onClick={() => setSqlModalOpen(true)} size="sm" variant="outline">
+                              <Code className="h-4 w-4 mr-2" />
+                              View SQL
+                            </Button>
+                            <Button onClick={() => setFeedbackDialogOpen(true)} size="sm" variant="outline">
+                              <MessageSquare className="h-4 w-4 mr-2" />
+                              Modify SQL
+                            </Button>
+                            <Button
+                              onClick={() => {
+                                if (!currentConversationId || !queryResult?.sql) return;
+                                executeSql.mutate({
+                                  conversationId: currentConversationId,
+                                  sql: queryResult.sql,
+                                });
+                              }}
+                              size="sm"
+                              variant="default"
+                              disabled={executeSql.isPending}
+                              className="bg-blue-600 hover:bg-blue-700"
+                            >
+                              {executeSql.isPending ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                              ) : (
+                                <Database className="h-4 w-4 mr-2" />
+                              )}
+                              Run Query
+                            </Button>
+                          </div>
+                        </div>
+                        {queryResult.assumedSchema && queryResult.assumedSchema.length > 0 && (
+                          <p className="text-xs text-yellow-700 mt-2">
+                            📝 Assumed: {queryResult.assumedSchema.join('; ')}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {/* Query Results - 在消息流中显示 */}
+                {queryResult?.success && (
+                  <div className="flex justify-start w-full">
+                    <div className="w-full max-w-2xl">
+                      <div className="border rounded-lg p-4 bg-white shadow-sm">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-3">
+                            <h3 className="font-semibold">Query Results ({queryResult.rowCount} rows)</h3>
+                            {availableCompanies.length > 0 && (
+                              <select
+                                value={companyFilter}
+                                onChange={(e) => setCompanyFilter(e.target.value)}
+                                className="border rounded px-2 py-1 text-sm"
+                              >
+                                <option value="all">All Companies</option>
+                                {availableCompanies.map(company => (
+                                  <option key={company} value={company}>{company}</option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            <Button onClick={() => setSqlModalOpen(true)} size="sm" variant="outline">
+                              <Code className="h-4 w-4 mr-2" />
+                              View SQL
+                            </Button>
+                            <Button
+                              onClick={() => {
+                                if (!queryResult?.data || !queryResult?.sql) return;
+                                generateInsights.mutate({
+                                  originalQuestion: input,
+                                  sql: queryResult.sql,
+                                  results: queryResult.data,
+                                  rowCount: queryResult.rowCount,
+                                });
+                              }}
+                              size="sm"
+                              variant="outline"
+                              disabled={generateInsights.isPending}
+                            >
+                              {generateInsights.isPending ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                              ) : (
+                                <Database className="h-4 w-4 mr-2" />
+                              )}
+                              Generate Insights
+                            </Button>
+                            <Button onClick={handleExport} size="sm" disabled={exportToExcel.isPending}>
+                              {exportToExcel.isPending ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                              ) : (
+                                <Download className="h-4 w-4 mr-2" />
+                              )}
+                              Export to Excel
+                            </Button>
+                          </div>
+                        </div>
+                        
+                        {/* Debug Info - 只在开发环境显示 */}
+                        {process.env.NODE_ENV === 'development' && (
+                          <div className="text-xs text-muted-foreground mb-2 p-2 bg-gray-50 rounded">
+                            Debug: success={queryResult?.success}, data.length={queryResult?.data?.length}, rowCount={queryResult?.rowCount}
+                          </div>
+                        )}
+                        
+                        {queryResult.data && queryResult.data.length > 0 ? (
+                          <>
+                            <div className="border rounded-lg overflow-auto max-h-96">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    {queryResult.columns?.map((col: any) => (
+                                      <TableHead key={col.name}>{col.name}</TableHead>
+                                    ))}
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {queryResult.data
+                                    .filter((row: any) => {
+                                      if (companyFilter === 'all') return true;
+                                      const dataAreaCol = queryResult.columns?.find((col: any) =>
+                                        col.name.toLowerCase() === 'dataareaid'
+                                      );
+                                      return dataAreaCol && row[dataAreaCol.name] === companyFilter;
+                                    })
+                                    .slice(0, 100)
+                                    .map((row: any, idx: number) => (
+                                      <TableRow key={idx}>
+                                        {queryResult.columns?.map((col: any) => (
+                                          <TableCell key={col.name}>
+                                            {row[col.name]?.toString() || ""}
+                                          </TableCell>
+                                        ))}
+                                      </TableRow>
+                                    ))}
+                                </TableBody>
+                              </Table>
+                              {queryResult.data.length > 100 && (
+                                <div className="p-2 text-sm text-muted-foreground text-center border-t">
+                                  Showing first 100 rows. Export to Excel to see all {queryResult.rowCount} rows.
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* User Feedback */}
+                            <QueryFeedback
+                              naturalLanguageQuery={input}
+                              generatedSql={queryResult.sql}
+                              onFeedbackSubmitted={(satisfied) => {
+                                console.log(`User feedback: ${satisfied ? 'satisfied' : 'not satisfied'}`);
+                              }}
+                            />
+                          </>
+                        ) : (
+                          <div className="text-center py-8 text-muted-foreground">
+                            <p>No data returned from query.</p>
+                            <p className="text-sm">Query executed successfully but returned 0 rows.</p>
+                            
+                            {/* User Feedback - Show even for empty results */}
+                            <QueryFeedback
+                              naturalLanguageQuery={input}
+                              generatedSql={queryResult.sql}
+                              onFeedbackSubmitted={(satisfied) => {
+                                console.log(`User feedback: ${satisfied ? 'satisfied' : 'not satisfied'}`);
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {isSubmitting && (
                   <div className="flex justify-start w-full">
                     <div className="w-full max-w-2xl">
@@ -803,147 +1028,6 @@ export default function Chat() {
               </div>
             )}
           </div>
-
-          {/* Pending Execution - Show Run Query button */}
-          {queryResult?.pendingExecution && queryResult?.sql && (
-            <div className="border-t p-4 bg-blue-50">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <h3 className="font-semibold text-blue-800">SQL Ready to Execute</h3>
-                  {queryResult.confidence === "inferred" && (
-                    <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">
-                      ⚠️ Inferred schema
-                    </span>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <Button onClick={() => setSqlModalOpen(true)} size="sm" variant="outline">
-                    <Code className="h-4 w-4 mr-2" />
-                    View SQL
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      if (!currentConversationId || !queryResult?.sql) return;
-                      executeSql.mutate({
-                        conversationId: currentConversationId,
-                        sql: queryResult.sql,
-                      });
-                    }}
-                    size="sm"
-                    variant="default"
-                    disabled={executeSql.isPending}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    {executeSql.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <Database className="h-4 w-4 mr-2" />
-                    )}
-                    Run Query
-                  </Button>
-                </div>
-              </div>
-              {queryResult.assumedSchema && queryResult.assumedSchema.length > 0 && (
-                <p className="text-xs text-yellow-700 mt-2">
-                  📝 Assumed: {queryResult.assumedSchema.join('; ')}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Query Results */}
-          {queryResult?.success && queryResult.data && queryResult.data.length > 0 && (
-            <div className="border-t p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <h3 className="font-semibold">Query Results ({queryResult.rowCount} rows)</h3>
-                  {availableCompanies.length > 0 && (
-                    <select
-                      value={companyFilter}
-                      onChange={(e) => setCompanyFilter(e.target.value)}
-                      className="border rounded px-2 py-1 text-sm"
-                    >
-                      <option value="all">All Companies</option>
-                      {availableCompanies.map(company => (
-                        <option key={company} value={company}>{company}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <Button onClick={() => setSqlModalOpen(true)} size="sm" variant="outline">
-                    <Code className="h-4 w-4 mr-2" />
-                    View SQL
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      if (!queryResult?.data || !queryResult?.sql) return;
-                      generateInsights.mutate({
-                        originalQuestion: input,
-                        sql: queryResult.sql,
-                        results: queryResult.data,
-                        rowCount: queryResult.rowCount,
-                      });
-                    }}
-                    size="sm"
-                    variant="outline"
-                    disabled={generateInsights.isPending}
-                  >
-                    {generateInsights.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <Database className="h-4 w-4 mr-2" />
-                    )}
-                    Generate Insights
-                  </Button>
-                  <Button onClick={handleExport} size="sm" disabled={exportToExcel.isPending}>
-                    {exportToExcel.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <Download className="h-4 w-4 mr-2" />
-                    )}
-                    Export to Excel
-                  </Button>
-                </div>
-              </div>
-              <div className="border rounded-lg overflow-auto max-h-96">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      {queryResult.columns?.map((col: any) => (
-                        <TableHead key={col.name}>{col.name}</TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {queryResult.data
-                      .filter((row: any) => {
-                        if (companyFilter === 'all') return true;
-                        const dataAreaCol = queryResult.columns?.find((col: any) =>
-                          col.name.toLowerCase() === 'dataareaid'
-                        );
-                        return dataAreaCol && row[dataAreaCol.name] === companyFilter;
-                      })
-                      .slice(0, 100)
-                      .map((row: any, idx: number) => (
-                        <TableRow key={idx}>
-                          {queryResult.columns?.map((col: any) => (
-                            <TableCell key={col.name}>
-                              {row[col.name]?.toString() || ""}
-                            </TableCell>
-                          ))}
-                        </TableRow>
-                      ))}
-                  </TableBody>
-                </Table>
-                {queryResult.data.length > 100 && (
-                  <div className="p-2 text-sm text-muted-foreground text-center border-t">
-                    Showing first 100 rows. Export to Excel to see all {queryResult.rowCount} rows.
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Insights Display */}
           {showInsights && insights && (
@@ -1105,6 +1189,17 @@ export default function Chat() {
           context: q.context,
         }))}
       />
+
+      {/* SQL Feedback Dialog */}
+      {queryResult?.sql && (
+        <SqlFeedbackDialog
+          isOpen={feedbackDialogOpen}
+          onClose={() => setFeedbackDialogOpen(false)}
+          sql={queryResult.sql}
+          explanation={queryResult.explanation?.layman || queryResult.explanation || ""}
+          onSubmitFeedback={handleSqlFeedback}
+        />
+      )}
 
       {/* Prompt Viewer Modal */}
       <PromptViewerModal

@@ -1,0 +1,379 @@
+import { invokeLLM } from './_core/llm';
+import { queryCacheService } from './queryCacheService';
+import { metadataRegistry } from './metadataRegistry';
+import { preCorrectionService } from './preCorrectionService';
+
+/**
+ * 两阶段查询生成器 - 大幅减少 Token 消耗
+ * 
+ * 阶段 1: 轻量级表推断 (~200 tokens)
+ * 阶段 2: 完整 SQL 生成 (~1,000 tokens vs 8,000+)
+ */
+export class TwoStageQueryGenerator {
+  private static instance: TwoStageQueryGenerator;
+  
+  static getInstance(): TwoStageQueryGenerator {
+    if (!TwoStageQueryGenerator.instance) {
+      TwoStageQueryGenerator.instance = new TwoStageQueryGenerator();
+    }
+    return TwoStageQueryGenerator.instance;
+  }
+
+  /**
+   * 主入口：智能生成查询
+   */
+  async generateQuery(
+    userQuery: string,
+    userId: number,
+    conversationHistory?: Array<{ role: string; content: string }>
+  ): Promise<{
+    sql: string;
+    explanation: string;
+    confidence: string;
+    tablesUsed: string[];
+    fromCache: boolean;
+    tokenOptimization: {
+      stage1Tokens: number;
+      stage2Tokens: number;
+      totalTokens: number;
+      savedTokens: number;
+    };
+  }> {
+    // 步骤 1: 检查查询缓存
+    console.log(`[Two-Stage] 🔍 Checking query cache for: "${userQuery}"`);
+    const cachedQuery = await queryCacheService.getBestCachedQuery(userQuery, userId);
+    
+    if (cachedQuery && cachedQuery.similarity > 0.7) {
+      console.log(`[Two-Stage] ✅ Cache hit! Similarity: ${(cachedQuery.similarity * 100).toFixed(1)}%`);
+      
+      // 微调缓存的查询
+      const refinedSql = await this.refineCachedQuery(
+        cachedQuery.generatedSql,
+        userQuery,
+        cachedQuery.naturalQuery
+      );
+
+      return {
+        sql: refinedSql.sql,
+        explanation: `Based on similar query (${(cachedQuery.similarity * 100).toFixed(1)}% match): ${refinedSql.explanation}`,
+        confidence: 'high',
+        tablesUsed: this.extractTablesFromSql(refinedSql.sql),
+        fromCache: true,
+        tokenOptimization: {
+          stage1Tokens: 0,
+          stage2Tokens: 0,
+          totalTokens: 0,
+          savedTokens: 8000 // 节省了约 8,000 tokens
+        }
+      };
+    }
+
+    console.log(`[Two-Stage] 🚀 No cache hit, using two-stage generation`);
+    
+    // 步骤 2: 两阶段生成
+    const stage1Result = await this.stage1_InferTables(userQuery);
+    
+    if (!stage1Result.success) {
+      throw new Error(`Stage 1 failed: ${stage1Result.error}`);
+    }
+
+    const stage2Result = await this.stage2_GenerateSql(userQuery, stage1Result.tables!);
+    
+    // 保存到缓存
+    await queryCacheService.saveQuery(
+      userId,
+      userQuery,
+      stage2Result.sql,
+      'success'
+    );
+
+    return {
+      sql: stage2Result.sql,
+      explanation: stage2Result.explanation,
+      confidence: stage2Result.confidence,
+      tablesUsed: stage1Result.tables!,
+      fromCache: false,
+      tokenOptimization: {
+        stage1Tokens: stage1Result.tokensUsed || 0,
+        stage2Tokens: stage2Result.tokensUsed,
+        totalTokens: (stage1Result.tokensUsed || 0) + stage2Result.tokensUsed,
+        savedTokens: 8000 - ((stage1Result.tokensUsed || 0) + stage2Result.tokensUsed)
+      }
+    };
+  }
+
+  /**
+   * 阶段 1: 轻量级表推断
+   * Token 消耗: ~200 tokens
+   */
+  private async stage1_InferTables(userQuery: string): Promise<{
+    success: boolean;
+    tables?: string[];
+    tokensUsed?: number;
+    error?: string;
+  }> {
+    const systemPrompt = `You are a D365 F&O table selection expert. Based on the user's question, identify which tables they need.
+
+COMMON TABLE MAPPINGS:
+- Purchase orders: PurchTable (header), PurchLine (lines)
+- Vendors: VendTable, VendTrans
+- Customers: CustTable, CustTrans  
+- Sales: SalesTable, SalesLine
+- Invoices: VendInvoiceJour, CustInvoiceJour
+- Products/Items: InventTable, EcoResProduct
+- Projects: ProjTable, ProjTransPosting
+
+RULES:
+1. Return ONLY a JSON array of table names
+2. Use exact D365 table names (PascalCase)
+3. Maximum 4 tables
+4. If uncertain, choose the most likely tables
+5. NO explanations, just the array
+
+Example:
+["PurchTable", "VendTable"]`;
+
+    try {
+      const response = await invokeLLM({
+        messages: [
+          { role: 'system' as const, content: systemPrompt },
+          { role: 'user' as const, content: userQuery }
+        ],
+        maxTokens: 100 // 限制输出长度
+      });
+
+      const content = typeof response.choices[0].message.content === 'string' 
+        ? response.choices[0].message.content 
+        : JSON.stringify(response.choices[0].message.content);
+
+      // 解析表名
+      let tables: string[] = [];
+      try {
+        tables = JSON.parse(content);
+      } catch (parseError) {
+        // 如果 JSON 解析失败，尝试提取表名
+        const tableMatches = content.match(/\b[A-Z][a-zA-Z0-9]*\b/g) || [];
+        tables = tableMatches.filter(table => table.length > 3);
+      }
+
+      // 验证表名
+      const validTables = tables.filter(table => 
+        metadataRegistry.getAllObjectNames().has(table)
+      );
+
+      if (validTables.length === 0) {
+        return {
+          success: false,
+          error: 'No valid tables found',
+          tables: [],
+          tokensUsed: 200
+        };
+      }
+
+      console.log(`[Stage 1] ✅ Inferred tables: ${validTables.join(', ')}`);
+      
+      return {
+        success: true,
+        tables: validTables.slice(0, 4), // 最多4个表
+        tokensUsed: 200 // 估算
+      };
+      
+    } catch (error: any) {
+      // 如果是配额错误，返回一个合理的默认表选择
+      if (error.message?.includes('429') || error.message?.includes('quota')) {
+        console.log(`[Stage 1] ⚠️ Quota exceeded, using keyword-based table selection`);
+        
+        // 使用关键词匹配作为回退
+        const keywords = userQuery.toLowerCase().split(/\s+/);
+        const allTables = Array.from(metadataRegistry.getAllObjectNames());
+        const matchedTables = allTables.filter(table => 
+          keywords.some(keyword => table.toLowerCase().includes(keyword))
+        ).slice(0, 4);
+        
+        if (matchedTables.length > 0) {
+          return {
+            success: true,
+            tables: matchedTables,
+            tokensUsed: 0
+          };
+        }
+      }
+      
+      return {
+        success: false,
+        error: error.message || 'Unknown error',
+        tables: [],
+        tokensUsed: 200
+      };
+    }
+  }
+
+  /**
+   * 阶段 2: 基于选定表生成完整 SQL
+   * Token 消耗: ~1,000 tokens (vs 8,000+)
+   */
+  private async stage2_GenerateSql(userQuery: string, tables: string[]): Promise<{
+
+DATABASE: SQL Server (T-SQL syntax)
+RULES:
+- Use TOP clause (not LIMIT)
+- Use GETDATE() for current date
+- Use proper table/field names from D365 F&O
+- Generate syntactically correct T-SQL
+
+${preCorrectionHints}
+
+AVAILABLE TABLES:
+${tableSchemas}
+
+Generate a SQL query to answer: "${userQuery}"
+
+Return JSON:
+{
+  "sql": "SELECT TOP 50 ...",
+  "explanation": "Brief explanation",
+  "confidence": "high|medium|low"
+}`;
+
+    try {
+      const response = await invokeLLM({
+        messages: [
+          { role: 'system' as const, content: systemPrompt },
+          { role: 'user' as const, content: userQuery }
+        ],
+        maxTokens: 1000
+      });
+
+      const content = typeof response.choices[0].message.content === 'string' 
+        ? response.choices[0].message.content 
+        : JSON.stringify(response.choices[0].message.content);
+
+      const result = JSON.parse(content);
+      
+      console.log(`[Stage 2] ✅ Generated SQL: ${result.sql.substring(0, 100)}...`);
+      
+      return {
+        sql: result.sql,
+        explanation: result.explanation || 'Generated SQL query',
+        confidence: result.confidence || 'medium',
+        tokensUsed: 1000
+      };
+
+    } catch (error: any) {
+      // 如果是配额错误，生成一个简单的 SQL
+      if (error.message?.includes('429') || error.message?.includes('quota')) {
+        console.log(`[Stage 2] ⚠️ Quota exceeded, generating simple SQL template`);
+        
+        // 生成一个基本的 SQL 模板
+        const simpleSql = `SELECT TOP 50 * FROM ${tables[0]} WHERE 1=1`;
+        
+        return {
+          sql: simpleSql,
+          explanation: `Basic query for ${tables[0]} (quota exceeded, using template)`,
+          confidence: 'low',
+          tokensUsed: 0
+        };
+      }
+      
+      console.error('[Stage 2] ❌ Failed to generate SQL:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取表的详细结构
+   */
+  private async getTableSchemas(tables: string[]): Promise<string> {
+    const schemas: string[] = [];
+    
+    for (const tableName of tables) {
+      try {
+        // 尝试从数据库内省获取
+        const introspected = await introspectTables([tableName]);
+        if (introspected.has(tableName)) {
+          const schema = introspected.get(tableName)!;
+          schemas.push(`${tableName}:`);
+          schemas.push(`  Columns: ${schema.columns.map(c => `${c.name} (${c.type})`).join(', ')}`);
+          continue;
+        }
+      } catch (error) {
+        // 如果内省失败，使用元数据注册表
+      }
+
+      // 回退到元数据注册表
+      const metadata = metadataRegistry.getAllObjectNames().has(tableName);
+      if (metadata) {
+        schemas.push(`${tableName}:`);
+        schemas.push(`  Description: Table from D365 F&O`);
+        schemas.push(`  Available: Yes`);
+      }
+    }
+
+    return schemas.join('\n\n');
+  }
+
+  /**
+   * 微调缓存的查询
+   */
+  private async refineCachedQuery(
+    cachedSql: string,
+    currentUserQuery: string,
+    originalQuery: string
+  ): Promise<{
+    sql: string;
+    explanation: string;
+  }> {
+    // 简单的微调策略：如果查询相似度很高，直接使用
+    // 如果需要更复杂的微调，可以调用 LLM 进行调整
+    
+    const similarity = this.calculateQuerySimilarity(currentUserQuery, originalQuery);
+    
+    if (similarity > 0.9) {
+      // 高度相似，直接使用
+      return {
+        sql: cachedSql,
+        explanation: 'Direct cache match (high similarity)'
+      };
+    } else {
+      // 中等相似，可能需要微调
+      // 这里可以实现更复杂的微调逻辑
+      return {
+        sql: cachedSql,
+        explanation: 'Cache match with minor adjustments needed'
+      };
+    }
+  }
+
+  /**
+   * 计算查询相似度
+   */
+  private calculateQuerySimilarity(query1: string, query2: string): number {
+    const words1 = new Set(query1.toLowerCase().split(/\s+/));
+    const words2 = new Set(query2.toLowerCase().split(/\s+/));
+    
+    const intersection = new Set(Array.from(words1).filter(x => words2.has(x)));
+    const union = new Set(Array.from(words1).concat(Array.from(words2)));
+    
+    return intersection.size / union.size;
+  }
+
+  /**
+   * 从 SQL 中提取表名
+   */
+  private extractTablesFromSql(sql: string): string[] {
+    const tableMatches = sql.match(/FROM\s+(\w+)|JOIN\s+(\w+)/gi) || [];
+    const tables = new Set<string>();
+    
+    tableMatches.forEach(match => {
+      const tableName = match.split(/\s+/)[1];
+      if (tableName && /^[A-Z][a-zA-Z0-9]*$/.test(tableName)) {
+        tables.add(tableName);
+      }
+    });
+    
+    return Array.from(tables);
+  }
+}
+
+// 导出单例实例
+export const twoStageQueryGenerator = TwoStageQueryGenerator.getInstance();

@@ -22,6 +22,9 @@ export type InsertUser = typeof users.$inferInsert;
 // Knowledge Base Documents
 export * from "./schema-knowledge";
 
+// Comments Data
+export * from "./schema-comments";
+
 /**
  * User security roles mapping for users
  */
@@ -88,15 +91,25 @@ export const columnPermissions = mysqlTable("column_permissions", {
 export type ColumnPermission = typeof columnPermissions.$inferSelect;
 export type InsertColumnPermission = typeof columnPermissions.$inferInsert;
 
-/**
- * D365 F&O metadata tables
- */
+// Labels table for D365 label translations
+export const labels = mysqlTable("labels", {
+  id: int("id").autoincrement().primaryKey(),
+  labelId: varchar("labelId", { length: 255 }).notNull().unique(),
+  labelText: text("labelText").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Label = typeof labels.$inferSelect;
+export type InsertLabel = typeof labels.$inferInsert;
 export const metadataTables = mysqlTable("metadata_tables", {
   id: int("id").autoincrement().primaryKey(),
   tableName: varchar("tableName", { length: 255 }).notNull().unique(),
   description: text("description"),
   businessPurpose: text("businessPurpose"),
   codeLayerInfo: text("codeLayerInfo"),
+  label: varchar("label", { length: 255 }),
+  labelText: text("labelText"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -117,6 +130,8 @@ export const metadataFields = mysqlTable("metadata_fields", {
   isPrimaryKey: boolean("isPrimaryKey").default(false),
   isForeignKey: boolean("isForeignKey").default(false),
   referencedTable: varchar("referencedTable", { length: 255 }),
+  label: varchar("label", { length: 255 }),
+  labelText: text("labelText"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -337,3 +352,21 @@ export const companies = mysqlTable("companies", {
 
 export type Company = typeof companies.$inferSelect;
 export type InsertCompany = typeof companies.$inferInsert;
+
+/**
+ * Table Rules
+ * Stores specific rules for different tables to guide AI query generation
+ */
+export const tableRules = mysqlTable("table_rules", {
+  id: int("id").autoincrement().primaryKey(),
+  tableName: varchar("tableName", { length: 255 }).notNull().unique(),
+  tableRule: text("tableRule").notNull(),
+  isActive: boolean("isActive").default(true),
+  priority: int("priority").default(0), // Higher priority rules take precedence
+  description: text("description"), // Optional description of what the rule does
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type TableRule = typeof tableRules.$inferSelect;
+export type InsertTableRule = typeof tableRules.$inferInsert;
