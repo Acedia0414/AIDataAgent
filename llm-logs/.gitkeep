@@ -1,3 +1,0 @@
-# This file ensures the llm-logs/ directory is tracked by git
-# Git ignores empty directories, so .gitkeep preserves the folder structure
-# LLM query logs (*.md files) are generated here but not committed (see .gitignore)
