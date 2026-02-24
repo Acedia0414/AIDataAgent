@@ -1,4 +1,5 @@
 const { tableKnowledgeBaseService } = require('../server/tableKnowledgeBaseService.cjs');
+const { tableRulesService } = require('../server/tableRulesService.cjs');
 
 class SystemPromptGenerator {
   constructor() {
@@ -44,6 +45,15 @@ class SystemPromptGenerator {
       const connection = await tableKnowledgeBaseService.connect();
       const allTables = [];
       
+      // Get all table rules
+      let allRules = [];
+      try {
+        allRules = await tableRulesService.getAllRules();
+        console.log(`📋 Found ${allRules.length} table rules`);
+      } catch (rulesError) {
+        console.error('❌ Error getting table rules:', rulesError);
+      }
+      
       try {
         const [rows] = await connection.execute(
           `SELECT DISTINCT table_name, table_label, scenario_explanation, area 
@@ -55,11 +65,21 @@ class SystemPromptGenerator {
         console.log(`📊 Found ${rows.length} tables in table_knowledge_base`);
         
         rows.forEach(row => {
+          // Find rules for this table
+          const tableRules = allRules.filter(rule => 
+            rule.isActive && rule.tableName === row.table_name
+          ).sort((a, b) => b.priority - a.priority);
+          
           allTables.push({
             name: row.table_name,
             label: row.table_label || row.table_name,
             scenario: row.scenario_explanation || 'No description available',
-            area: row.area || 'Unknown'
+            area: row.area || 'Unknown',
+            rules: tableRules.map(rule => ({
+              rule: rule.tableRule,
+              priority: rule.priority,
+              description: rule.description
+            }))
           });
         });
         
@@ -77,11 +97,21 @@ class SystemPromptGenerator {
           if (area.area) {
             const tables = await tableKnowledgeBaseService.getTablesByArea(area.area);
             tables.forEach(table => {
+              // Find rules for this table
+              const tableRules = allRules.filter(rule => 
+                rule.isActive && rule.tableName === table.table_name
+              ).sort((a, b) => b.priority - a.priority);
+              
               allTables.push({
                 name: table.table_name,
                 label: table.table_label || table.table_name,
                 scenario: table.scenario_explanation || 'No description available',
-                area: table.area || 'Unknown'
+                area: table.area || 'Unknown',
+                rules: tableRules.map(rule => ({
+                  rule: rule.tableRule,
+                  priority: rule.priority,
+                  description: rule.description
+                }))
               });
             });
           }
@@ -102,6 +132,12 @@ class SystemPromptGenerator {
         console.log(`📋 Sample table details:`);
         allTables.slice(0, 2).forEach(table => {
           console.log(`  - ${table.name}: Label "${table.label}", Scenario "${table.scenario}", Area "${table.area}"`);
+          if (table.rules && table.rules.length > 0) {
+            console.log(`    Rules: ${table.rules.length} rules found`);
+            table.rules.slice(0, 1).forEach(rule => {
+              console.log(`    - Rule: ${rule.rule.substring(0, 100)}...`);
+            });
+          }
         });
       }
       
@@ -155,7 +191,20 @@ ${this.getAreaSummary(tables)}`;
     sortedAreas.forEach(area => {
       dictionary += `\n#### ${area}:\n`;
       tablesByArea[area].forEach(table => {
-        dictionary += `- ${table.name}: Label "${table.label}", Scenario "${table.scenario}", Area "${table.area}"\n`;
+        dictionary += `- ${table.name}: Label "${table.label}", Scenario "${table.scenario}", Area "${table.area}"`;
+        
+        // Add table rules if they exist
+        if (table.rules && table.rules.length > 0) {
+          dictionary += `\n  Table Rules:`;
+          table.rules.forEach(rule => {
+            dictionary += `\n    - ${rule.rule}`;
+            if (rule.description) {
+              dictionary += ` (${rule.description})`;
+            }
+          });
+        }
+        
+        dictionary += `\n`;
       });
     });
 
@@ -201,14 +250,33 @@ CRITICAL: Return ONLY a JSON array of selected table names.
       const selectedAreas = areas.slice(0, limitAreas);
       const allTables = [];
       
+      // Get all table rules
+      let allRules = [];
+      try {
+        allRules = await tableRulesService.getAllRules();
+        console.log(`📋 Found ${allRules.length} table rules for test prompt`);
+      } catch (rulesError) {
+        console.error('❌ Error getting table rules for test prompt:', rulesError);
+      }
+      
       for (const area of selectedAreas) {
         const tables = await tableKnowledgeBaseService.getTablesByArea(area.area);
         tables.forEach(table => {
+          // Find rules for this table
+          const tableRules = allRules.filter(rule => 
+            rule.isActive && rule.tableName === table.table_name
+          ).sort((a, b) => b.priority - a.priority);
+          
           allTables.push({
             name: table.table_name,
             label: table.table_label || table.table_name,
             scenario: table.scenario_explanation || 'No description available',
-            area: table.area || 'Unknown'
+            area: table.area || 'Unknown',
+            rules: tableRules.map(rule => ({
+              rule: rule.tableRule,
+              priority: rule.priority,
+              description: rule.description
+            }))
           });
         });
       }
