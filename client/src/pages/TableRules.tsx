@@ -18,7 +18,8 @@ import {
   AlertCircle,
   CheckCircle,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  ChevronDown
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
@@ -39,6 +40,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 interface TableRule {
   id: number;
@@ -69,6 +83,7 @@ export default function TableRules() {
     description: '',
     priority: 0
   });
+  const [tableNameOpen, setTableNameOpen] = useState(false);
 
   const { data: rulesData, refetch } = trpc.admin.tableRules.list.useQuery(undefined, {
     enabled: !!user,
@@ -216,19 +231,44 @@ export default function TableRules() {
               <div className="grid gap-4 py-4 flex-1 overflow-y-auto">
                 <div className="grid gap-2">
                   <Label htmlFor="tableName">Table Name</Label>
-                  <Select
-                    value={formData.tableName}
-                    onValueChange={(value) => setFormData(prev => ({ ...prev, tableName: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select or type table name" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {COMMON_TABLES.map(table => (
-                        <SelectItem key={table} value={table}>{table}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Popover open={tableNameOpen} onOpenChange={setTableNameOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        className="justify-between"
+                      >
+                        {formData.tableName || "Select or type table name..."}
+                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[200px] p-0">
+                      <Command>
+                        <CommandInput
+                          placeholder="Search table..."
+                          value={formData.tableName}
+                          onValueChange={(value) => setFormData(prev => ({ ...prev, tableName: value }))}
+                        />
+                        <CommandList>
+                          <CommandEmpty>No table found.</CommandEmpty>
+                          <CommandGroup>
+                            {COMMON_TABLES.map((table) => (
+                              <CommandItem
+                                key={table}
+                                value={table}
+                                onSelect={(currentValue) => {
+                                  setFormData(prev => ({ ...prev, tableName: currentValue }));
+                                  setTableNameOpen(false);
+                                }}
+                              >
+                                {table}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
                 
                 <div className="grid gap-2">
