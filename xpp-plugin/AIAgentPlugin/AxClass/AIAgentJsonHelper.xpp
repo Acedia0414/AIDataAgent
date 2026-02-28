@@ -1,0 +1,70 @@
+/// <summary>
+/// Utility class for JSON serialization of D365 records.
+/// Used by all AI Agent service wrappers to convert temp table records to JSON.
+/// </summary>
+class AIAgentJsonHelper
+{
+    /// <summary>
+    /// Escapes special characters in a string for safe JSON embedding.
+    /// Handles double quotes, backslashes, and control characters.
+    /// </summary>
+    /// <param name="_value">The string value to escape.</param>
+    /// <returns>The escaped string safe for JSON embedding.</returns>
+    public static str escapeJsonString(str _value)
+    {
+        str result = _value;
+
+        // Escape backslashes first (before adding new ones)
+        result = strReplace(result, '\\', '\\\\');
+        // Escape double quotes
+        result = strReplace(result, '"', '\\"');
+        // Escape newlines
+        result = strReplace(result, '\n', '\\n');
+        // Escape carriage returns
+        result = strReplace(result, '\r', '\\r');
+        // Escape tabs
+        result = strReplace(result, '\t', '\\t');
+
+        return result;
+    }
+
+    /// <summary>
+    /// Converts a date to ISO 8601 format string (YYYY-MM-DD).
+    /// Returns null string for the D365 null date (1900-01-01).
+    /// </summary>
+    /// <param name="_date">The date to convert.</param>
+    /// <returns>ISO date string or "null" for empty dates.</returns>
+    public static str dateToJsonString(TransDate _date)
+    {
+        if (_date == dateNull() || _date == mkDate(1, 1, 1900))
+        {
+            return 'null';
+        }
+
+        return strFmt('"%1-%2-%3"',
+            year(_date),
+            num2Str0(mthOfYr(_date), 2, 0, 0, 0),
+            num2Str0(dayOfMth(_date), 2, 0, 0, 0)
+        );
+    }
+
+    /// <summary>
+    /// Wraps a string value in JSON quotes with proper escaping.
+    /// </summary>
+    /// <param name="_value">The string value.</param>
+    /// <returns>Quoted and escaped JSON string.</returns>
+    public static str stringToJson(str _value)
+    {
+        return strFmt('"%1"', AIAgentJsonHelper::escapeJsonString(_value));
+    }
+
+    /// <summary>
+    /// Converts a real number to a JSON number string with 2 decimal places.
+    /// </summary>
+    /// <param name="_value">The numeric value.</param>
+    /// <returns>Formatted number string.</returns>
+    public static str realToJson(real _value)
+    {
+        return num2Str(_value, 0, 2, DecimalSeparator::Dot, ThousandSeparator::None);
+    }
+}

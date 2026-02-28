@@ -1,0 +1,71 @@
+/// <summary>
+/// Service class that wraps the LedgerTrialBalanceDP data provider.
+/// Exposes the Trial Balance Report logic as an OData action for the AI Data Agent's
+/// Reconciliation Engine to call remotely.
+/// </summary>
+/// <remarks>
+/// Deployment: Add to the AIAgentPlugin model, build, and deploy via LCS.
+/// OData endpoint: POST /api/services/AIAgentServiceGroup/AIAgentTrialBalanceService/GetTrialBalanceData
+/// </remarks>
+[SysODataServiceGroup("AIAgentServiceGroup")]
+class AIAgentTrialBalanceService
+{
+    /// <summary>
+    /// Executes the LedgerTrialBalanceDP data provider with the given contract parameters
+    /// and returns the results as a JSON string.
+    /// </summary>
+    /// <param name="_fromDate">Start date for the trial balance period.</param>
+    /// <param name="_toDate">End date for the trial balance period.</param>
+    /// <param name="_companyId">The legal entity / company ID (e.g., "USMF").</param>
+    /// <returns>JSON array string containing the trial balance rows.</returns>
+    [SysODataActionAttribute("GetTrialBalanceData", false),
+     SysEntryPointAttribute(true)]
+    public static str GetTrialBalanceData(
+        TransDate       _fromDate,
+        TransDate       _toDate,
+        str             _companyId)
+    {
+        str jsonResult = '';
+        int rowCount = 0;
+
+        changecompany(_companyId)
+        {
+            // Build the contract
+            LedgerTrialBalanceContract contract = new LedgerTrialBalanceContract();
+            contract.parmFromDate(_fromDate);
+            contract.parmToDate(_toDate);
+
+            // Instantiate and run the DP class
+            LedgerTrialBalanceDP dataProvider = new LedgerTrialBalanceDP();
+            dataProvider.parmDataContract(contract);
+            dataProvider.processReport();
+
+            // Read the temp table results
+            LedgerTrialBalanceTmp tmpTable = dataProvider.getLedgerTrialBalanceTmp();
+
+            while select tmpTable
+            {
+                if (rowCount > 0)
+                {
+                    jsonResult += ',';
+                }
+
+                jsonResult += strFmt(
+                    '{"MainAccountId":"%1","MainAccountName":"%2","OpeningBalance":%.2f,"DebitAmount":%.2f,"CreditAmount":%.2f,"ClosingBalance":%.2f,"YTDDebit":%.2f,"YTDCredit":%.2f}',
+                    tmpTable.MainAccountId,
+                    SysComputedColumn::comparisonLiteral(tmpTable.MainAccountName),
+                    tmpTable.OpeningBalance,
+                    tmpTable.DebitAmount,
+                    tmpTable.CreditAmount,
+                    tmpTable.ClosingBalance,
+                    tmpTable.YTDDebit,
+                    tmpTable.YTDCredit
+                );
+
+                rowCount++;
+            }
+        }
+
+        return strFmt('[%1]', jsonResult);
+    }
+}

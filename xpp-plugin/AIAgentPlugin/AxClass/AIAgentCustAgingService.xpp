@@ -1,0 +1,78 @@
+/// <summary>
+/// Service class that wraps the CustAgingReportDP data provider.
+/// Exposes the Customer Aging Report logic as an OData action for the AI Data Agent's
+/// Reconciliation Engine to call remotely.
+/// </summary>
+/// <remarks>
+/// Deployment: Add to the AIAgentPlugin model, build, and deploy via LCS.
+/// OData endpoint: POST /api/services/AIAgentServiceGroup/AIAgentCustAgingService/GetCustAgingReportData
+/// </remarks>
+[SysODataServiceGroup("AIAgentServiceGroup")]
+class AIAgentCustAgingService
+{
+    /// <summary>
+    /// Executes the CustAgingReportDP data provider with the given contract parameters
+    /// and returns the results as a JSON string.
+    /// </summary>
+    /// <param name="_agingDate">The aging date to use for the report (e.g., today's date).</param>
+    /// <param name="_agingPeriodDefinition">The aging period definition name (e.g., "30_60_90").</param>
+    /// <param name="_balanceAsOf">Balance as of: 0 = Transaction date, 1 = Due date.</param>
+    /// <param name="_companyId">The legal entity / company ID (e.g., "USMF").</param>
+    /// <returns>JSON array string containing the aging report rows.</returns>
+    [SysODataActionAttribute("GetCustAgingReportData", false),
+     SysEntryPointAttribute(true)]
+    public static str GetCustAgingReportData(
+        TransDate       _agingDate,
+        str             _agingPeriodDefinition,
+        int             _balanceAsOf,
+        str             _companyId)
+    {
+        str jsonResult = '';
+        int rowCount = 0;
+
+        // Switch to the requested company context
+        changecompany(_companyId)
+        {
+            // Build the contract
+            CustAgingReportContract contract = new CustAgingReportContract();
+            contract.parmAgingDate(_agingDate);
+            contract.parmAgingPeriodDefinition(_agingPeriodDefinition);
+            contract.parmBalanceAsOf(_balanceAsOf);
+
+            // Instantiate and run the DP class
+            CustAgingReportDP dataProvider = new CustAgingReportDP();
+            dataProvider.parmDataContract(contract);
+            dataProvider.processReport();
+
+            // Read the temp table results
+            CustAgingReportTmp tmpTable = dataProvider.getCustAgingReportTmp();
+
+            while select tmpTable
+            {
+                if (rowCount > 0)
+                {
+                    jsonResult += ',';
+                }
+
+                // Serialize key fields to JSON
+                jsonResult += strFmt(
+                    '{"AccountNum":"%1","Name":"%2","Balance":%.2f,"Current":%.2f,"Period1":%.2f,"Period2":%.2f,"Period3":%.2f,"Period4":%.2f,"Period5":%.2f,"Period6":%.2f}',
+                    tmpTable.AccountNum,
+                    SysComputedColumn::comparisonLiteral(tmpTable.Name),
+                    tmpTable.Balance,
+                    tmpTable.Current,
+                    tmpTable.Period1,
+                    tmpTable.Period2,
+                    tmpTable.Period3,
+                    tmpTable.Period4,
+                    tmpTable.Period5,
+                    tmpTable.Period6
+                );
+
+                rowCount++;
+            }
+        }
+
+        return strFmt('[%1]', jsonResult);
+    }
+}

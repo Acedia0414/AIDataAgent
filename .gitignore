@@ -1,8 +1,11 @@
 
 
 
-# Irrelevant thingy
-Ax*
+# Irrelevant thingy (root-level Ax* metadata exports only)
+/Ax*
+
+# Allow X++ plugin files
+!xpp-plugin/
 *.zip
 output-repomix
 output-repomix.md

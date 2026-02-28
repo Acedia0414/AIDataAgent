@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AI Agent Service Group
+  
+  This service group bundles all AI Agent DP class wrappers into a single
+  OData endpoint. After deployment, all services are accessible at:
+  
+  POST https://<environment>.operations.dynamics.com/api/services/AIAgentServiceGroup/<ServiceName>/<ActionName>
+  
+  Services included:
+  - AIAgentCustAgingService/GetCustAgingReportData
+  - AIAgentVendAgingService/GetVendAgingReportData
+  - AIAgentTrialBalanceService/GetTrialBalanceData
+-->
+<AxServiceGroup>
+  <Name>AIAgentServiceGroup</Name>
+  <Label>AI Data Agent Service Group</Label>
+  <Description>Service group for AI Data Agent reconciliation engine. Exposes D365 report DP classes as OData actions.</Description>
+  <AutoDeploy>Yes</AutoDeploy>
+  <Services>
+    <Service>
+      <Name>AIAgentCustAgingService</Name>
+      <Class>AIAgentCustAgingService</Class>
+      <ExternalName>AIAgentCustAgingService</ExternalName>
+    </Service>
+    <Service>
+      <Name>AIAgentVendAgingService</Name>
+      <Class>AIAgentVendAgingService</Class>
+      <ExternalName>AIAgentVendAgingService</ExternalName>
+    </Service>
+    <Service>
+      <Name>AIAgentTrialBalanceService</Name>
+      <Class>AIAgentTrialBalanceService</Class>
+      <ExternalName>AIAgentTrialBalanceService</ExternalName>
+    </Service>
+  </Services>
+</AxServiceGroup>
